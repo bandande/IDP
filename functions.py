@@ -79,8 +79,16 @@ class Robot:
         self.front_left_sensor = True
         self.front_right_sensor = True
         
+        self.left_sensor_previous = True
+        self.right_sensor_previous = True
+        self.front_left_sensor_previous = True
+        self.front_right_sensor_previous = True
+        
         self.has_box = False
         self.box_count = 0
+        
+        self.motor_left=False
+        self.motor_right=False
 
     
     # Detection
@@ -157,10 +165,10 @@ class Robot:
         
         
         self.objective = location
-        if turning=="straight":
-            return ["straight"]
-        else:
-            return ["straight", ["turning", turning, "90"]]
+        return ["straight", ["turning", turning, "90"]]
+    
+    def identify_junction(self):
+        pass
     
     
 robot=Robot()
