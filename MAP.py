@@ -1,4 +1,8 @@
 MAP = {
+    # DEAD_END is converted to FILLED for filled spaces 
+    # and COLLECTED for collected boxes. Once all boxes are 
+    # collected, COLLECTED will be replaced by DEAD_END again
+    
     # ==================================================
     # CENTRAL NETWORK
     # ==================================================
