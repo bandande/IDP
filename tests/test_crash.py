@@ -1,5 +1,5 @@
 """
-Step 4: 2 x SEN0138 crash sensors (the only sensors that need extra parts).
+Step 6: 2 x SEN0138 crash sensors (the only sensors that need extra parts).
 
 Wiring per sensor: VCC -> 5V rail of the robot board (VBUS, physical pin 40, is
 only 5V while USB is plugged in), GND -> GND, OUT -> divider -> Pico pin:

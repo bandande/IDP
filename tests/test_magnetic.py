@@ -1,5 +1,5 @@
 """
-Step 6: 3-wire Hall (magnetic) sensor.
+Step 5: 3-wire Hall (magnetic) sensor.
 
 Wiring: + -> 3V3(OUT) (physical pin 36), - -> GND (e.g. AGND, physical 33),
 signal -> GP26 (physical 31, ADC0). No extra parts.
