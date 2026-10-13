@@ -6,12 +6,16 @@ Device facts
     pull-up resistor and a status LED. Pins: 1 = digital out, 2 = VCC, 3 = GND.
   * Supply 5V only. Output HIGH (5V) when released, LOW when pressed
     (DFRobot's example code treats LOW as "pressed").
-  * !!! The released output is 5V and RP2040 GPIOs are NOT 5V tolerant. Put a
+  * !!! The released output is 5V. RP2040 GPIOs are NOT 5V tolerant and the
+    RP2350 (Pico 2) only tolerates 5V while it is powered. Put a
     voltage divider between the sensor output and the Pico pin, e.g. 10k from
     the output to the pin and 20k from the pin to GND, and measure the pin
     voltage before connecting it (about 2.2-3.3 V released, about 0 V pressed).
-    The resistor to GND also pulls the pin low if the sensor comes unplugged,
-    so a disconnected sensor reads as "pressed" and is noticed straight away.
+    Keep the effective resistance to GND at or below about 8.2k when pressed
+    (10k || 20k = 6.7k is fine): early RP2350 chips (A2 stepping, erratum E9)
+    can leave a weakly pulled-down input stuck at about 2.2 V, which reads HIGH.
+    For the same reason an unplugged sensor may read as "released" rather than
+    "pressed" on a Pico 2, so check each sensor with a press test after wiring.
 
 Data processing
   * Debounced level: the state only changes after the pin has been stable

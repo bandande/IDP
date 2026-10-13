@@ -1,0 +1,29 @@
+{
+    "python.languageServer": "Pylance",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    },
+    "python.terminal.activateEnvironment": false,
+    "micropico.openOnStart": true,
+    "micropico.pyIgnore": [
+        "**/.picowgo",
+        "**/.micropico",
+        "**/.vscode",
+        "**/.gitignore",
+        "**/.git",
+        "**/.DS_Store",
+        "**/project.pico-go",
+        "**/env",
+        "**/venv",
+        "**/.venv",
+        "**/.idea",
+        "**/tools"
+    ],
+    "python.analysis.typeshedPaths": [
+        "~/.micropico-stubs/included"
+    ],
+    "python.analysis.extraPaths": [
+        "~/.micropico-stubs/included"
+    ]
+}
