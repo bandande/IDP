@@ -1,8 +1,8 @@
 """
 Step 5: 3-wire Hall (magnetic) sensor.
 
-Wiring: + -> 3V3(OUT) (physical pin 36), - -> GND (e.g. AGND, physical 33),
-signal -> GP26 (physical 31, ADC0). No extra parts.
+Wiring (team schematic, "Magnetometer"): 1 OUT -> GP26 (physical 31, ADC0),
+2 GND -> GND (physical 38), 3 VS -> 3V3_OUT (physical 36). No extra parts.
 
 Checks (analog module, config.MAG_MODE = "analog"):
   1. With no magnet nearby the field stays within about +/-100 mV of zero.

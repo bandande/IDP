@@ -1,8 +1,11 @@
 """
 Step 2: 4 x SEN0017 line sensors.
 
-Wiring: VCC -> 3V3(OUT) (physical pin 36), GND -> any GND, OUT -> the GP pins in
-config.py (left to right: GP18/19/20/21 = physical 24/25/26/27). No extra parts.
+Wiring (team schematic): VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38),
+OUT, left to right across the robot:
+    Edge Left   -> GP20 (physical 26)      Centre Right -> GP19 (physical 25)
+    Centre Left -> GP21 (physical 27)      Edge Right   -> GP18 (physical 24)
+No extra parts.
 
 Checks:
   1. Over black floor the pattern is "....".

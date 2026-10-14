@@ -1,9 +1,11 @@
 """
 Step 3: 2 x VL53L0X time-of-flight sensors.
 
-Wiring per sensor: VIN -> 3V3(OUT) (physical pin 36, never 5V), GND -> GND,
-SDA/SCL -> the pins in config.TOF_SENSORS (front: GP8/GP9 = physical 11/12,
-side: GP10/GP11 = physical 14/15). XSHUT can stay unconnected. No extra parts:
+Wiring per sensor (team schematic, boards labelled + - C D): + -> 3V3_OUT
+(physical 36, never 5V), - -> GND (physical 38), D = SDA and C = SCL:
+    Distance Sensor 1 "dist1": D -> GP12 (physical 16), C -> GP13 (physical 17), I2C0
+    Distance Sensor 2 "dist2": D -> GP10 (physical 14), C -> GP11 (physical 15), I2C1
+No XSHUT pin on these boards (one sensor per bus instead). No extra parts:
 the Pico enables its internal I2C pull-ups; add 4.7k pull-ups to 3V3 or set
 I2C_FREQ_HZ = 100000 only if readings are flaky on long wires.
 Peel the protective film off the sensor window.
@@ -12,7 +14,7 @@ Checks:
   1. "available True" for both sensors (else see last_error and run test_wiring).
   2. Hand / box at 100-500 mm: distance follows it, status 11.
   3. Nothing in front: distance None, raw 8190/8191 or status 4.
-Offset calibration: calibrate_offset("front", 100) with a flat target exactly
+Offset calibration: calibrate_offset("dist1", 100) with a flat target exactly
 100 mm in front of the sensor, then copy the printed offset into config.py.
 Stop with Ctrl-C.
 """

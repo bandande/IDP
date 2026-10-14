@@ -1,15 +1,14 @@
 """
-Step 6: 2 x SEN0138 crash sensors (the only sensors that need extra parts).
+Step 6: 2 x SEN0138 crash sensors.
 
-Wiring per sensor: VCC -> 5V rail of the robot board (VBUS, physical pin 40, is
-only 5V while USB is plugged in), GND -> GND, OUT -> divider -> Pico pin:
-    OUT --[10k]--+-- GPIO (left GP16 = physical 21, right GP17 = physical 22)
-                 |
-               [20k]
-                 |
-                GND
-Before connecting the GPIO wire, measure the divider midpoint with a
-multimeter: about 2.2-3.3 V released, about 0 V pressed. Never above 3.3 V.
+Wiring (team schematic): VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38),
+DIG/S (signal) straight to the Pico, no divider:
+    Crash Sensor L -> GP6 (physical 9)      Crash Sensor R -> GP7 (physical 10)
+Only if the sensors are powered from 5V instead: a divider (10k series, 20k
+to GND) is REQUIRED between DIG/S and the Pico pin.
+GP6 / GP7 were a motor driver channel in earlier teams' code: check that
+nothing else on the robot board is connected to physical pins 9 and 10.
+Measure the signal with a multimeter first: about 3.3 V released, 0 V pressed.
 
 Checks: raw 1 / pressed False at rest; press a lever -> raw 0, pressed True,
 one hit counted per press; tap quickly -> still exactly one hit.

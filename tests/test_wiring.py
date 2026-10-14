@@ -5,7 +5,7 @@ Prints config.validate() problems, scans the I2C bus of every ToF sensor
 (a VL53L0X answers at 41 = 0x29), then shows the raw level of every digital
 sensor pin once per second. Expected:
   line pins    0 over black floor, 1 over white tape
-  crash pins   1 released, 0 pressed (measure 2.2-3.3 V released before connecting!)
+  crash pins   1 released, 0 pressed
   IR pin       1 when idle, flickers to 0 while a remote control is pressed
   magnet (ADC) analog Hall sensor: about 2.1-2.25 V with no magnet, moves with a magnet
 Stop with Ctrl-C.
@@ -21,6 +21,8 @@ from sensors.tof import make_i2c
 def test_wiring(seconds=None):
     problems = config.validate()
     print("config.validate():", problems if problems else "OK")
+    for w in config.warnings():
+        print("check on the board:", w)
 
     for spec in config.TOF_SENSORS:
         bus = make_i2c(spec["i2c_id"], spec["sda"], spec["scl"], config.I2C_FREQ_HZ)

@@ -6,17 +6,20 @@ for the sensor bench session: what is in the repository, how every sensor is
 wired, how to get the code onto the Pico, and a step-by-step test plan with
 pass criteria, calibration sheet and troubleshooting.
 
+All sensor pins follow the team schematic **SCH_Schematic1 V1.0** (EasyEDA,
+updated 2026-10-13). `config.py` is the single place where they are defined.
+
 ---
 
-## 1. Status (2026-10-13)
+## 1. Status (2026-10-14)
 
 | Sensor | Count | Code | Tested on the robot |
 |---|---|---|---|
-| Line tracking, DFRobot SEN0017 | 4 | `sensors/line_sensor.py`, `sensors/line_processing.py` | 2 of 4, on temporary test pins (see section 12) |
-| Distance (ToF), VL53L0X | 2 | `sensors/tof.py` | front: yes (6 min, 0 I2C errors, about 35 readings/s, 24-829 mm); side: not yet |
+| Line tracking, DFRobot SEN0017 | 4 | `sensors/line_sensor.py`, `sensors/line_processing.py` | 2 sensors worked on temporary pins; re-test on the schematic pins |
+| Distance (ToF), VL53L0X | 2 | `sensors/tof.py` | one sensor worked on GP8/GP9 (6 min, 0 I2C errors, about 35 readings/s, 24-829 mm); re-test as dist1 / dist2 on the schematic pins |
 | Crash, DFRobot SEN0138 L/R | 2 | `sensors/crash.py` | not yet |
 | IR receiver, Vishay TSOP4838 | 1 | `sensors/ir_receiver.py` | not yet |
-| Magnetic (Hall, analog output) | 1 | `sensors/magnetic.py` | yes (analog, thresholds set) |
+| Magnetic (Hall, analog output) | 1 | `sensors/magnetic.py` | yes, on GP26 (same pin as the schematic); analog, thresholds set |
 
 The board: `Raspberry Pi Pico2 with RP2350`, MicroPython v1.28.0, appears as a
 USB serial port (COM8 on the laptop used so far, USB ID 2E8A:0005).
@@ -27,8 +30,7 @@ USB serial port (COM8 on the laptop used so far, USB ID 2E8A:0005).
 
 Hardware
 - Robot board with the Pico 2, USB cable
-- Multimeter (needed before the crash sensors are connected)
-- Resistors for the crash sensor dividers: 2 x 10k and 2 x 20k (or similar, see section 5)
+- Multimeter
 - A strip of white tape on black card (line sensors)
 - A flat light-coloured target and a ruler (ToF calibration)
 - A permanent magnet (Hall sensor)
@@ -48,7 +50,7 @@ Software on the laptop
 |---|---|---|
 | `main.py` | Pico | main loop (work in progress, see section 12). The Pico runs it automatically at every boot. |
 | `functions.py`, `MAP.py`, `constants.py` | Pico | navigation: `Robot` state, route finding on the course map, turn helpers |
-| `config.py` | Pico | every sensor pin and tuning constant; `validate()` checks for pin clashes; `physical_pin(gp)` |
+| `config.py` | Pico | every sensor pin and tuning constant; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
 | `sensors/` | Pico | one module per sensor: hardware interface + data processing |
 | `libs/VL53L0X.py` | Pico | VL53L0X driver from the department template (unchanged) |
 | `tests/test_*.py` | Pico | on-robot test scripts, one per sensor, numbered in the recommended order |
@@ -62,7 +64,7 @@ Sensor modules
 |---|---|
 | `sensors/line_sensor.py` | `LineSensorArray.from_config()`, `.read()` -> 4-bit mask (bit set = white), `.read_raw()` |
 | `sensors/line_processing.py` | `LineTracker` (steering error -1..+1, ON_LINE / SEARCHING / LOST), `JunctionDetector` (ENTER / EXIT events with shape FOUR_JUNCTION / T_JUNCTION / CORNER, the names used in `MAP.py`), `bits_to_str()` |
-| `sensors/tof.py` | `tof_from_config()` -> `{"front": ToFSensor, "side": ToFSensor}`; `.poll()`, `.distance_mm` (None = no target / stale / unavailable), `.raw_mm`, `.range_status`, `.is_closer_than(mm)`, `.begin()` |
+| `sensors/tof.py` | `tof_from_config()` -> `{"dist1": ToFSensor, "dist2": ToFSensor}`; `.poll()`, `.distance_mm` (None = no target / stale / unavailable), `.raw_mm`, `.range_status`, `.is_closer_than(mm)`, `.begin()` |
 | `sensors/crash.py` | `BumperPair.from_config()`, `.update()`, `.which()` -> None / "LEFT" / "RIGHT" / "BOTH", `.consume_hits()` |
 | `sensors/ir_receiver.py` | `IRReceiver.from_config()`, `.process()`, `.signal_present()`, `.get_frame()`; `decode_nec(frame)`, `match_template(frame, template)`, `frame_signature(frame)` |
 | `sensors/magnetic.py` | `HallSensor.from_config()`, `.calibrate_baseline()`, `.update()`, `.detected`, `.consume_detection()`, `.field_mv`, `.polarity` |
@@ -76,85 +78,92 @@ data processing and a usage example.
 ## 4. Reading the Pico pinout
 
 - Two numbering schemes. **Code uses GP numbers** (`Pin(18)` is GP18). **The
-  jumpers on the robot board are labelled with physical pin numbers 1-40.**
-  They are different: GP18 is physical pin 24. `config.physical_pin(18)`
-  returns 24, and every pin in `config.py` has both numbers in its comment.
+  jumpers on the robot board and the schematic pin numbers are physical pin
+  numbers 1-40.** They are different: GP18 is physical pin 24.
+  `config.physical_pin(18)` returns 24, and every pin in `config.py` has both
+  numbers in its comment.
 - Physical numbering: board seen from the top, USB socket at the top. Pin 1
   is top-left, numbers go down the left side to 20, continue at the bottom
   right with 21 and go up the right side to 40.
 - Every fifth pin is a GND: 3, 8, 13, 18, 23, 28, 33 (AGND), 38.
-- Power pins: 36 = 3V3(OUT), the 3.3 V supply for sensors. 39 = VSYS.
-  40 = VBUS, 5 V **only while USB is plugged in**. Do not connect anything to
-  37 (3V3_EN), 30 (RUN) or 35 (ADC_VREF).
+- Power pins: 36 = 3V3(OUT), the 3.3 V supply for all sensors in the
+  schematic. 39 = VSYS. 40 = VBUS, 5 V **only while USB is plugged in**. Do not
+  connect anything to 37 (3V3_EN), 30 (RUN) or 35 (ADC_VREF).
 - Only GP26, GP27, GP28 (physical 31, 32, 34) can read analog voltages.
-- I2C: SDA and SCL must belong to the same bus. I2C0 on GP8/GP9 and I2C1 on
-  GP10/GP11 are used here (one ToF sensor per bus).
+- I2C: SDA and SCL must belong to the same bus. The schematic uses I2C0 on
+  GP12/GP13 and I2C1 on GP10/GP11 (one ToF sensor per bus).
 - **All GPIO pins are 3.3 V. Never put 5 V on a GPIO pin.**
 
-### Header map with this project's assignments
+### Header map (schematic V1.0)
 
 ```
- Left side                                       Right side
- phys  GP    use                                 phys  GP     use
-  1    GP0   motor driver 1 #1 DIR   (board)      21   GP16   crash LEFT (via divider)
-  2    GP1   motor driver 1 #1 PWM   (board)      22   GP17   crash RIGHT (via divider)
-  3    GND                                        23   GND
-  4    GP2   motor driver 1 #2 (assumed)          24   GP18   line outer-left
-  5    GP3   motor driver 1 #2 (assumed)          25   GP19   line inner-left
-  6    GP4   motor driver 2 #1 DIR   (board)      26   GP20   line inner-right
-  7    GP5   motor driver 2 #1 PWM   (board)      27   GP21   line outer-right
-  8    GND                                        28   GND
-  9    GP6   motor driver 2 #2 PWM   (board)      29   GP22   IR receiver OUT
- 10    GP7   motor driver 2 #2 DIR   (board)      30   RUN    do not use
- 11    GP8   ToF front  D (SDA)                   31   GP26   magnetic sensor OUT (ADC0)
- 12    GP9   ToF front  C (SCL)                   32   GP27   free (ADC1)
- 13    GND   ToF ground                           33   AGND   magnetic sensor ground
- 14    GP10  ToF side   D (SDA)                   34   GP28   free (ADC2)
- 15    GP11  ToF side   C (SCL)                   35   ADC_VREF  do not use
- 16    GP12  free (dept. example: start button)   36   3V3(OUT)  sensor power 3.3 V
- 17    GP13  servo 2 header (assumed)             37   3V3_EN    do not use
- 18    GND                                        38   GND
- 19    GP14  free                                 39   VSYS
- 20    GP15  servo 1 header  (board)              40   VBUS   5 V only with USB
+ phys GP    use (left side)                             phys GP    use (right side)
+    1 GP0   motor driver 1 #1 DIR  (board)                21 GP16  free
+    2 GP1   motor driver 1 #1 PWM  (board)                22 GP17  free
+    3 GND                                                 23 GND
+    4 GP2   motor driver 1 #2  (assumed)                  24 GP18  Line Sensor Edge Right    OUT
+    5 GP3   motor driver 1 #2  (assumed)                  25 GP19  Line Sensor Centre Right  OUT
+    6 GP4   motor driver 2 #1 DIR  (board)                26 GP20  Line Sensor Edge Left     OUT
+    7 GP5   motor driver 2 #1 PWM  (board)                27 GP21  Line Sensor Centre Left   OUT
+    8 GND                                                 28 GND
+    9 GP6   Crash Sensor L  DIG/S  (CHECK)                29 GP22  free
+   10 GP7   Crash Sensor R  DIG/S  (CHECK)                30 RUN   do not use
+   11 GP8   free                                          31 GP26  Magnetometer OUT (ADC0)
+   12 GP9   free                                          32 GP27  free (ADC1)
+   13 GND                                                 33 AGND
+   14 GP10  Distance Sensor 2  D (SDA) I2C1               34 GP28  free (ADC2)
+   15 GP11  Distance Sensor 2  C (SCL) I2C1               35 VREF  ADC_VREF, do not use
+   16 GP12  Distance Sensor 1  D (SDA) I2C0               36 3V3   3V3_OUT: power for ALL sensors
+   17 GP13  Distance Sensor 1  C (SCL) I2C0 (CHECK)       37 3V3EN 3V3_EN, do not use
+   18 GND                                                 38 GND   ground for ALL sensors
+   19 GP14  free                                          39 VSYS
+   20 GP15  IR Sensor OUT  (CHECK)                        40 VBUS  5 V only with USB
 ```
 
-"(board)" pins are wired on the robot board (from the department example
-code); "(assumed)" ones are inferred and should be confirmed.
+- "(board)": wired on the robot board according to the department example code.
+- "(CHECK)": the schematic uses the pin for a sensor, but the department
+  examples or earlier teams used it for something else (section 12, item 5).
+- Free for the servos, the start button and other additions: GP8, GP9, GP14,
+  GP16, GP17, GP22, GP27, GP28.
 
 ---
 
-## 5. Wiring reference
+## 5. Wiring reference (schematic V1.0)
 
-Do all wiring with the USB cable unplugged.
+Do all wiring with the USB cable unplugged. Every sensor gets VCC from
+**3V3_OUT (physical 36)** and GND from **GND (physical 38)**; any other GND pin
+works as well. No sensor needs extra parts.
 
-| Sensor | Sensor pins | Connect to (physical pin) | Extra parts |
+| Sensor (schematic name) | Sensor pins | Signal -> Pico (physical / GP) | Code name |
 |---|---|---|---|
-| Line sensor x4 (3 wires) | red +, black -, green signal | + -> 36, - -> any GND, signal -> 24 / 25 / 26 / 27 (left to right) | none |
-| ToF front (`+ - C D`) | + / - / C = SCL / D = SDA | + -> 36, - -> 13, C -> 12, D -> 11 | none |
-| ToF side (`+ - C D`) | + / - / C = SCL / D = SDA | + -> 36, - -> 13, C -> 15, D -> 14 | none |
-| IR receiver TSOP4838 | lens facing you, legs down: 1 OUT, 2 GND, 3 VS | OUT -> 29, GND -> any GND, VS -> 36 | optional supply filter (about 100 ohm in series with VS, a few uF to GND) if noisy near the motors |
-| Magnetic sensor (3 wires) | +, -, signal | + -> 36, - -> 33, signal -> 31 | none |
-| Crash sensor x2 | 1 OUT, 2 VCC, 3 GND | VCC -> robot board 5 V rail, GND -> GND, OUT -> divider -> 21 (left) / 22 (right) | **voltage divider, required** |
-
-Crash sensor divider (one per sensor). The sensor needs 5 V and its output
-idles at 5 V, which would damage the Pico:
-
-```
- sensor OUT --[10k]--+--> Pico pin (physical 21 or 22)
-                     |
-                   [20k]
-                     |
-                    GND
-```
-
-Measure the divider midpoint before connecting it to the Pico: about
-2.2-3.3 V released, about 0 V pressed. Never more than 3.3 V.
+| Line Sensor Edge Left | 1 OUT, 2 VCC, 3 GND | OUT -> 26 / GP20 | `LINE_OUTER_LEFT_PIN` |
+| Line Sensor Centre Left | 1 OUT, 2 VCC, 3 GND | OUT -> 27 / GP21 | `LINE_INNER_LEFT_PIN` |
+| Line Sensor Centre Right | 1 OUT, 2 VCC, 3 GND | OUT -> 25 / GP19 | `LINE_INNER_RIGHT_PIN` |
+| Line Sensor Edge Right | 1 OUT, 2 VCC, 3 GND | OUT -> 24 / GP18 | `LINE_OUTER_RIGHT_PIN` |
+| Distance Sensor 1 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 16 / GP12, C -> 17 / GP13 (I2C0) | `"dist1"` |
+| Distance Sensor 2 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 14 / GP10, C -> 15 / GP11 (I2C1) | `"dist2"` |
+| Crash Sensor L | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 9 / GP6 | `CRASH_LEFT_PIN` |
+| Crash Sensor R | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 10 / GP7 | `CRASH_RIGHT_PIN` |
+| IR Sensor TSOP4838 | 1 OUT, 2 GND, 3 VCC (VS) | OUT -> 20 / GP15 | `IR_RX_PIN` |
+| Magnetometer (Hall, analog) | 1 OUT, 2 GND, 3 VS | OUT -> 31 / GP26 (ADC0) | `MAG_PIN` |
 
 Notes
-- Only 4 wires on the ToF boards means no XSHUT pin, so both sensors keep
-  address 0x29. That is why each one has its own I2C bus.
+- Line sensors, left to right across the robot: Edge Left, Centre Left,
+  Centre Right, Edge Right. In the code the Edge sensors are "outer" and the
+  Centre sensors "inner".
+- The ToF boards have only 4 wires (no XSHUT), so both keep address 0x29.
+  That is why each one has its own I2C bus.
+- Crash sensors: the schematic powers them from 3.3 V, so their output is at
+  most 3.3 V and goes straight to the Pico. DFRobot rates the board for 5 V;
+  the micro-switch and its pull-up work at 3.3 V, only the LED is dimmer.
+  **If they are ever moved to 5 V, a divider (10k series, 20k to GND) between
+  DIG/S and the Pico pin becomes mandatory.**
+- IR receiver: lens facing you, legs down, left to right: 1 OUT, 2 GND, 3 VS.
+  Optional supply filter if it is noisy near the motors: about 100 ohm in
+  series with VS and a few uF from VS to GND, close to the sensor.
 - Follow the letters printed on each board, not the wire colours.
-- Total 3.3 V load (4 line + 2 ToF + IR + Hall) is about 120 mA, within what 3V3(OUT) can supply.
+- Total 3.3 V load (4 line + 2 ToF + 2 crash + IR + Hall) is about 130 mA,
+  within what 3V3(OUT) can supply.
 
 ---
 
@@ -186,41 +195,44 @@ Go in this order and only wire the sensors needed for each step. Each step
 says what "pass" looks like. Write the results into the sheet in section 9.
 
 ### Step 0 - before power-up
-- [ ] Every sensor + wire goes to 36 (3.3 V), except the crash sensors (5 V).
-- [ ] Nothing 5 V reaches a GPIO pin.
-- [ ] `config.validate()` reports no problems (step 1 prints it).
+- [ ] Every sensor VCC goes to physical 36 (3V3_OUT), every GND to a GND pin.
+- [ ] Nothing is connected to 37, 39, 40 by mistake (37 is next to 36).
+- [ ] Nothing else is plugged into the motor driver 2 #2 channel or the servo
+      headers that share GP6, GP7, GP13, GP15 (section 12, item 5).
 
 ### Step 1 - wiring check: `tests/test_wiring.py`
-Prints the config check, scans both ToF I2C buses and prints the raw level of
-every sensor pin once per second.
-- Pass: `config.validate(): OK`; each connected ToF bus shows `[41]` (0x29);
+Prints the config check and the pins to check on the board, scans both ToF
+I2C buses and prints the raw level of every sensor pin once per second.
+- Pass: `config.validate(): OK`; the four "check on the board" lines are
+  understood (section 12, item 5); each connected ToF bus shows `[41]` (0x29);
   pin levels change when you act on a sensor.
 
 ### Step 2 - line sensors: `tests/test_line_sensors.py`
 Mount the sensors 1-2 cm above the floor, in a row across the robot.
 1. Over black floor the pattern is `....`.
 2. Put white tape under each sensor in turn: the matching character becomes
-   `#`, left to right. Wrong position -> fix the pin order in `config.py`.
+   `#`, in the order Edge Left, Centre Left, Centre Right, Edge Right. Wrong
+   position -> the wires do not match the schematic, or fix `config.py`.
    Everything inverted -> set `LINE_WHITE_IS_HIGH = False`.
 3. Robot centred on the line: `.##.` and error `+0.00`. Slide it sideways:
    line to the left of the robot gives a negative error.
 4. Push the robot slowly over a junction: `ENTER` then `EXIT` events.
 - Pass: all four sensors respond and are in the right order.
-- Geometry assumption used by the code: the two inner sensors are closer
-  together than the line width (both on white when centred); each outer
+- Geometry assumption used by the code: the two Centre sensors are closer
+  together than the line width (both on white when centred); each Edge
   sensor is more than one line width further out. Measure the line width and
   note the spacing you used.
 - The outputs are digital (0/1 only); the SEN0017 has no analog output.
 
 ### Step 3 - ToF distance sensors: `tests/test_tof.py` (or the viewer, Distance tab)
-Peel the protective film off the sensor window.
+Peel the protective film off the sensor windows.
 1. Both sensors show `available True` (else check the wiring, section 11).
 2. Move a hand or box between 100 and 500 mm: the distance follows, status 11.
 3. Nothing in front: distance `None` (raw 8190/8191, status 4).
 4. Calibrate the offset: flat target exactly 100 mm from the window, then in
-   the REPL `from tests.test_tof import calibrate_offset; calibrate_offset("front", 100)`
+   the REPL `from tests.test_tof import calibrate_offset; calibrate_offset("dist1", 100)`
    (or the Calibrate button in the viewer). Put the printed `offset_mm` into
-   `config.TOF_SENSORS`. Repeat for "side".
+   `config.TOF_SENSORS`. Repeat for "dist2".
 5. Wiggle the cables: the I2C error count must stay at 0. Rising errors mean
    a loose wire; a sensor that lost power stops measuring until it is
    re-initialised (press Apply in the viewer or restart the test).
@@ -253,12 +265,13 @@ The script first measures the zero-field baseline: keep magnets away.
   magnet is still detected.
 
 ### Step 6 - crash sensors: `tests/test_crash.py`
-1. Build the dividers (section 5) and **measure the midpoint first**:
-   about 2.2-3.3 V released, about 0 V pressed.
-2. Only then connect to physical 21 (left) and 22 (right).
+1. Check that VCC goes to 3V3_OUT (36), not 5 V. Measure DIG/S with a
+   multimeter: about 3.3 V released, about 0 V pressed.
+2. Make sure nothing else on the robot board is connected to physical 9 and
+   10 (GP6 / GP7), see section 12, item 5.
 3. At rest: raw 1, pressed False. Press a lever: raw 0, pressed True, one hit
    per press. A quick tap still counts exactly once.
-- Pass: both sensors, correct side, one hit per press.
+- Pass: both sensors, correct side (L = GP6, R = GP7), one hit per press.
 - An unplugged sensor may read "released" on this chip (RP2350 erratum E9),
   so always do the press test after wiring.
 
@@ -281,12 +294,12 @@ python tools/sensor_viewer.py --tab mag --connect --record log.txt
   Pico, soft-resets it and starts `tests/stream_sensors.py`, so the code must
   be uploaded first.
 - Wiring row: type GP numbers (not physical numbers) for each sensor group
-  and press Apply. Leave a field empty to switch that group off. This lets
-  you test any temporary wiring without editing `config.py`. ToF pins always
-  come from `config.py`.
-- Overview tab: pin monitor (every free header pin; unused pins read a steady
-  HIGH because their pull-up is on, a connected sensor makes its pin change),
-  line pattern and error, distances, crash, IR.
+  and press Apply. The defaults are the schematic pins from `config.py`.
+  Leave a field empty to switch that group off. ToF pins always come from
+  `config.py`.
+- Overview tab: pin monitor (every header pin except the motor driver pins;
+  unused pins read a steady HIGH because their pull-up is on, a connected
+  sensor makes its pin change), line pattern and error, distances, crash, IR.
 - Distance tab: one card per ToF sensor with the I2C scan result, status,
   rate and noise; continuous distance curve (solid = filtered, dashed = raw);
   offset calibration helper.
@@ -303,16 +316,18 @@ Fill this in during the session, then update `config.py`.
 
 | Item | Value | Goes into |
 |---|---|---|
-| Line sensor order correct (L -> R) | yes / no | `LINE_*_PIN` |
+| Line sensor order correct (Edge L, Centre L, Centre R, Edge R) | yes / no | `LINE_*_PIN` |
 | Line sensors white = HIGH | yes / no | `LINE_WHITE_IS_HIGH` |
-| Line width / inner spacing / outer spacing (mm) | | (geometry check) |
+| Line width / Centre spacing / Edge spacing (mm) | | (geometry check) |
 | Line sensor height above floor (mm) | | |
-| ToF front offset at 100 mm (mm) | | `TOF_SENSORS[0]["offset_mm"]` |
-| ToF side offset at 100 mm (mm) | | `TOF_SENSORS[1]["offset_mm"]` |
+| dist1 offset at 100 mm (mm) | | `TOF_SENSORS[0]["offset_mm"]` |
+| dist2 offset at 100 mm (mm) | | `TOF_SENSORS[1]["offset_mm"]` |
+| Where dist1 / dist2 are mounted (front / side ...) | | (rename in `config.py` if wanted) |
 | ToF floor visible at mounting height? | yes / no | (mounting) |
-| Crash divider voltage released / pressed, left (V) | / | (safety) |
-| Crash divider voltage released / pressed, right (V) | / | (safety) |
+| Crash DIG/S voltage released / pressed, left (V) | / | (expect 3.3 / 0) |
+| Crash DIG/S voltage released / pressed, right (V) | / | (expect 3.3 / 0) |
 | Crash pressed = LOW | yes / no | `CRASH_ACTIVE_LOW` |
+| GP6, GP7, GP13, GP15 free on the robot board | yes / no | (section 12, item 5) |
 | IR: remote decoded (address, command) | | |
 | IR: traffic light template frame | | (code) |
 | Magnetic baseline (mV) | | (check) |
@@ -337,7 +352,7 @@ from sensors.magnetic import HallSensor
 line = LineSensorArray.from_config()
 tracker = LineTracker.from_config()
 junctions = JunctionDetector.from_config()
-tofs = tof_from_config()            # blocking start-up, about 0.1 s
+tofs = tof_from_config()            # blocking start-up, a fraction of a second
 bumpers = BumperPair.from_config()
 ir = IRReceiver.from_config()
 mag = HallSensor.from_config()
@@ -356,8 +371,8 @@ while True:
 
     if event is not None and event.kind == "EXIT":
         print(event.shape, event.left, event.right, event.straight)
-    if tofs["front"].is_closer_than(80):
-        pass                                 # object ahead
+    if tofs["dist1"].is_closer_than(80):
+        pass                                 # object ahead of Distance Sensor 1
     hit = bumpers.consume_hits()             # None, "LEFT", "RIGHT", "BOTH"
     frame = ir.get_frame()                   # None or a list of pulse lengths
     if mag.consume_detection():
@@ -379,12 +394,13 @@ turn, because spinning sweeps the sensors over other lines.
 | Viewer: "Cannot open COM..." / mpremote "failed to access" | another program holds the port | disconnect MicroPico, close other viewers / terminals |
 | Viewer: "no data - is the code uploaded?" | files missing on the Pico, or `main.py` running | upload the project; press Connect again (the viewer interrupts `main.py`) |
 | `AttributeError: module has no attribute ...` after an upload | the Pico still uses an older imported module | soft-reset (Ctrl-D) |
-| ToF bus scan `[]` | no power, wrong pins, C/D swapped | `+` on 36, `-` on GND, D on 11 / 14, C on 12 / 15; check with test_wiring |
+| ToF bus scan `[]` | no power, wrong pins, C/D swapped | `+` on 36, `-` on GND; dist1: D on 16, C on 17; dist2: D on 14, C on 15; check with test_wiring |
 | ToF works, then I2C errors climb and readings stop | loose wire or power glitch | fix the wiring, then Apply in the viewer / restart the test |
 | ToF always `None` while raw looks right | range status not 11 | check `range_status`; `require_valid_status=False` disables the check |
 | Line pattern inverted | output polarity | `LINE_WHITE_IS_HIGH = False` |
-| Line characters in the wrong place | pin order | swap the GP numbers in `config.py` |
-| Crash always "pressed" | sensor unpowered / divider wrong / unplugged | measure the divider midpoint; check the 5 V supply |
+| Line characters in the wrong place | wires do not match the schematic | compare with section 5, or swap the GP numbers in `config.py` |
+| Crash always "pressed" | sensor unpowered, DIG/S on the wrong pin | measure DIG/S (3.3 V released); check VCC on 36 |
+| A motor moves when a crash lever is touched | GP6 / GP7 also wired to a motor driver | disconnect at once; move the crash sensors to free pins (e.g. GP16 / GP17) and update `config.py` and the schematic |
 | IR: never any frames | VS on the wrong pin, remote not 38 kHz | pins 1 OUT, 2 GND, 3 VS; try another remote |
 | Magnet detected with no magnet nearby | baseline drift or a magnet nearby during calibration | recalibrate (Apply in the viewer / restart the test) away from magnets; raise `MAG_OFF_MV` |
 | `SyntaxError` in `main.py` on the Pico | MicroPython-incompatible syntax | see section 12 |
@@ -408,14 +424,22 @@ MicroPython 1.29 interpreter:
 4. `reset_map()` rewrites `MAP.py` on the Pico's flash on every run. Consider
    keeping the visited / collected state in memory instead.
 
-Sensors
-5. Line sensors are currently on temporary test pins: physical 21 (GP16) and
-   17 (GP13). `config.py` expects physical 24-27 (GP18-21), and GP16 is the
-   left crash sensor pin. Move the wires before testing the crash sensors.
-6. ToF side, crash sensors and IR receiver are not yet tested on hardware.
-7. A ToF sensor that loses power is not re-initialised automatically yet.
-8. GP2/GP3 (motor driver 1 #2) and GP13 (servo 2) are inferred from the
-   department examples. Confirm on the robot board.
+Hardware / schematic
+5. **Pins to check on the robot board.** The schematic uses four pins that
+   the department examples or earlier teams used for something else
+   (`config.CHECK_PINS`, printed by `config.warnings()` and `test_wiring`):
+   - GP6 / GP7 (physical 9 / 10), crash sensors: earlier teams drove a motor
+     on GP6 (PWM) / GP7 (DIR), probably motor driver 2 channel 2. If that
+     channel is wired on the board, a crash sensor would drive the motor
+     driver input. Confirm the channel is unused / disconnected.
+   - GP13 (physical 17), Distance Sensor 1 SCL: possibly the servo 2 header.
+   - GP15 (physical 20), IR sensor: the servo 1 header in the department
+     example. Do not plug a servo into that header.
+   Free alternatives if a pin turns out to be taken: GP8, GP9, GP14, GP16,
+   GP17, GP22, GP27, GP28.
+6. The servos and a start button are not in the schematic yet.
+7. GP2 / GP3 (motor driver 1 #2) are inferred from the department examples.
+8. A ToF sensor that loses power is not re-initialised automatically yet.
 
 ---
 
@@ -434,4 +458,5 @@ Sensors
   ```
 
   (use `-o /dev/null` on macOS / Linux)
-- Keep pins in `config.py` only, and run `config.validate()` after changing them.
+- Keep pins in `config.py` only, keep them in step with the schematic, and
+  run `config.validate()` and `config.warnings()` after changing them.

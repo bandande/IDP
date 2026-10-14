@@ -18,7 +18,7 @@ Wiring (both kinds): VCC -> 3V3(OUT) (physical 36), GND -> GND, signal ->
 config.MAG_PIN. The default GP26 (physical 31) is ADC-capable, so the same
 wiring works for both kinds and the kind can be identified by measurement:
 a digital module only ever reads about 0 V or 3.3 V. If the module only
-works at 5V, its output must go through a divider like the crash sensors.
+works at 5V, its output must go through a divider (e.g. 10k series, 20k to GND).
 
 Data processing
   * digital: debounced "detected" state, plus a "magnet arrived" event.
