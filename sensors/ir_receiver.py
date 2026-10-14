@@ -263,6 +263,10 @@ class IRReceiver:
             return True
         return self._recent and ticks_diff(now_us, self._last_edge_us) <= self.present_window_us
 
+    def raw(self):
+        """Current output level: 0 = IR burst being received, 1 = idle."""
+        return self._pin.value()
+
     def any(self):
         """Number of complete frames waiting."""
         return len(self._frames)

@@ -1,1 +1,462 @@
-# IDP
+# IDP - Sensor Bench Guide
+
+Cambridge Part IB Integrated Design Project. A line-following robot on a
+Raspberry Pi Pico 2 (RP2350) running MicroPython. This README is the guide
+for the sensor bench session: what is in the repository, how every sensor is
+wired, how to get the code onto the Pico, and a step-by-step test plan with
+pass criteria, calibration sheet and troubleshooting.
+
+All sensor pins follow the team schematic **SCH_Schematic1 V1.0** (EasyEDA,
+updated 2026-10-13). `config.py` is the single place where they are defined.
+
+---
+
+## 1. Status (2026-10-14)
+
+| Sensor | Count | Code | Tested on the robot |
+|---|---|---|---|
+| Line tracking, DFRobot SEN0017 | 4 | `sensors/line_sensor.py`, `sensors/line_processing.py` | 2 sensors worked on temporary pins; re-test on the schematic pins |
+| Distance (ToF), VL53L0X | 2 | `sensors/tof.py` | one sensor worked on GP8/GP9 (6 min, 0 I2C errors, about 35 readings/s, 24-829 mm); re-test as dist1 / dist2 on the schematic pins |
+| Crash, DFRobot SEN0138 L/R | 2 | `sensors/crash.py` | not yet |
+| IR receiver, Vishay TSOP4838 | 1 | `sensors/ir_receiver.py` | not yet |
+| Magnetic (Hall, analog output) | 1 | `sensors/magnetic.py` | yes, on GP26 (same pin as the schematic); analog, thresholds set |
+
+The board: `Raspberry Pi Pico2 with RP2350`, MicroPython v1.28.0, appears as a
+USB serial port (COM8 on the laptop used so far, USB ID 2E8A:0005).
+
+---
+
+## 2. Bring / install before the session
+
+Hardware
+- Robot board with the Pico 2, USB cable
+- Multimeter
+- A strip of white tape on black card (line sensors)
+- A flat light-coloured target and a ruler (ToF calibration)
+- A permanent magnet (Hall sensor)
+- Any TV remote control (IR receiver test; most use the NEC code)
+
+Software on the laptop
+- VS Code with the MicroPico extension (`paulober.pico-w-go`). Opening this
+  folder offers it automatically (`.vscode/extensions.json`).
+- Python 3 with pyserial for the live viewer: `pip install pyserial`
+- Optional: `pip install mpy-cross` to check that a file compiles for MicroPython (section 13)
+
+---
+
+## 3. Repository layout
+
+| Path | Runs on | Contents |
+|---|---|---|
+| `main.py` | Pico | main loop (work in progress, see section 12). The Pico runs it automatically at every boot. |
+| `functions.py`, `MAP.py`, `constants.py` | Pico | navigation: `Robot` state, route finding on the course map, turn helpers |
+| `config.py` | Pico | every sensor pin and tuning constant; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
+| `sensors/` | Pico | one module per sensor: hardware interface + data processing |
+| `libs/VL53L0X.py` | Pico | VL53L0X driver from the department template (unchanged) |
+| `tests/test_*.py` | Pico | on-robot test scripts, one per sensor, numbered in the recommended order |
+| `tests/stream_sensors.py` | Pico | streams every reading to the PC as JSON lines for the viewer |
+| `tools/sensor_viewer.py` | PC | live viewer window. Not uploaded to the Pico (excluded in `.vscode/settings.json`). |
+| `.micropico`, `.vscode/` | PC | MicroPico project settings |
+
+Sensor modules
+
+| Module | Main API |
+|---|---|
+| `sensors/line_sensor.py` | `LineSensorArray.from_config()`, `.read()` -> 4-bit mask (bit set = white), `.read_raw()` |
+| `sensors/line_processing.py` | `LineTracker` (steering error -1..+1, ON_LINE / SEARCHING / LOST), `JunctionDetector` (ENTER / EXIT events with shape FOUR_JUNCTION / T_JUNCTION / CORNER, the names used in `MAP.py`), `bits_to_str()` |
+| `sensors/tof.py` | `tof_from_config()` -> `{"dist1": ToFSensor, "dist2": ToFSensor}`; `.poll()`, `.distance_mm` (None = no target / stale / unavailable), `.raw_mm`, `.range_status`, `.is_closer_than(mm)`, `.begin()` |
+| `sensors/crash.py` | `BumperPair.from_config()`, `.update()`, `.which()` -> None / "LEFT" / "RIGHT" / "BOTH", `.consume_hits()` |
+| `sensors/ir_receiver.py` | `IRReceiver.from_config()`, `.process()`, `.signal_present()`, `.get_frame()`; `decode_nec(frame)`, `match_template(frame, template)`, `frame_signature(frame)` |
+| `sensors/magnetic.py` | `HallSensor.from_config()`, `.calibrate_baseline()`, `.update()`, `.detected`, `.consume_detection()`, `.field_mv`, `.polarity` |
+| `sensors/filters.py` | `MedianFilter`, `Debouncer`, `Hysteresis` |
+
+Every module starts with a docstring that explains the device, its wiring, the
+data processing and a usage example.
+
+---
+
+## 4. Reading the Pico pinout
+
+- Two numbering schemes. **Code uses GP numbers** (`Pin(18)` is GP18). **The
+  jumpers on the robot board and the schematic pin numbers are physical pin
+  numbers 1-40.** They are different: GP18 is physical pin 24.
+  `config.physical_pin(18)` returns 24, and every pin in `config.py` has both
+  numbers in its comment.
+- Physical numbering: board seen from the top, USB socket at the top. Pin 1
+  is top-left, numbers go down the left side to 20, continue at the bottom
+  right with 21 and go up the right side to 40.
+- Every fifth pin is a GND: 3, 8, 13, 18, 23, 28, 33 (AGND), 38.
+- Power pins: 36 = 3V3(OUT), the 3.3 V supply for all sensors in the
+  schematic. 39 = VSYS. 40 = VBUS, 5 V **only while USB is plugged in**. Do not
+  connect anything to 37 (3V3_EN), 30 (RUN) or 35 (ADC_VREF).
+- Only GP26, GP27, GP28 (physical 31, 32, 34) can read analog voltages.
+- I2C: SDA and SCL must belong to the same bus. The schematic uses I2C0 on
+  GP12/GP13 and I2C1 on GP10/GP11 (one ToF sensor per bus).
+- **All GPIO pins are 3.3 V. Never put 5 V on a GPIO pin.**
+
+### Header map (schematic V1.0)
+
+```
+ phys GP    use (left side)                             phys GP    use (right side)
+    1 GP0   motor driver 1 #1 DIR  (board)                21 GP16  free
+    2 GP1   motor driver 1 #1 PWM  (board)                22 GP17  free
+    3 GND                                                 23 GND
+    4 GP2   motor driver 1 #2  (assumed)                  24 GP18  Line Sensor Edge Right    OUT
+    5 GP3   motor driver 1 #2  (assumed)                  25 GP19  Line Sensor Centre Right  OUT
+    6 GP4   motor driver 2 #1 DIR  (board)                26 GP20  Line Sensor Edge Left     OUT
+    7 GP5   motor driver 2 #1 PWM  (board)                27 GP21  Line Sensor Centre Left   OUT
+    8 GND                                                 28 GND
+    9 GP6   Crash Sensor L  DIG/S  (CHECK)                29 GP22  free
+   10 GP7   Crash Sensor R  DIG/S  (CHECK)                30 RUN   do not use
+   11 GP8   free                                          31 GP26  Magnetometer OUT (ADC0)
+   12 GP9   free                                          32 GP27  free (ADC1)
+   13 GND                                                 33 AGND
+   14 GP10  Distance Sensor 2  D (SDA) I2C1               34 GP28  free (ADC2)
+   15 GP11  Distance Sensor 2  C (SCL) I2C1               35 VREF  ADC_VREF, do not use
+   16 GP12  Distance Sensor 1  D (SDA) I2C0               36 3V3   3V3_OUT: power for ALL sensors
+   17 GP13  Distance Sensor 1  C (SCL) I2C0 (CHECK)       37 3V3EN 3V3_EN, do not use
+   18 GND                                                 38 GND   ground for ALL sensors
+   19 GP14  free                                          39 VSYS
+   20 GP15  IR Sensor OUT  (CHECK)                        40 VBUS  5 V only with USB
+```
+
+- "(board)": wired on the robot board according to the department example code.
+- "(CHECK)": the schematic uses the pin for a sensor, but the department
+  examples or earlier teams used it for something else (section 12, item 5).
+- Free for the servos, the start button and other additions: GP8, GP9, GP14,
+  GP16, GP17, GP22, GP27, GP28.
+
+---
+
+## 5. Wiring reference (schematic V1.0)
+
+Do all wiring with the USB cable unplugged. Every sensor gets VCC from
+**3V3_OUT (physical 36)** and GND from **GND (physical 38)**; any other GND pin
+works as well. No sensor needs extra parts.
+
+| Sensor (schematic name) | Sensor pins | Signal -> Pico (physical / GP) | Code name |
+|---|---|---|---|
+| Line Sensor Edge Left | 1 OUT, 2 VCC, 3 GND | OUT -> 26 / GP20 | `LINE_OUTER_LEFT_PIN` |
+| Line Sensor Centre Left | 1 OUT, 2 VCC, 3 GND | OUT -> 27 / GP21 | `LINE_INNER_LEFT_PIN` |
+| Line Sensor Centre Right | 1 OUT, 2 VCC, 3 GND | OUT -> 25 / GP19 | `LINE_INNER_RIGHT_PIN` |
+| Line Sensor Edge Right | 1 OUT, 2 VCC, 3 GND | OUT -> 24 / GP18 | `LINE_OUTER_RIGHT_PIN` |
+| Distance Sensor 1 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 16 / GP12, C -> 17 / GP13 (I2C0) | `"dist1"` |
+| Distance Sensor 2 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 14 / GP10, C -> 15 / GP11 (I2C1) | `"dist2"` |
+| Crash Sensor L | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 9 / GP6 | `CRASH_LEFT_PIN` |
+| Crash Sensor R | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 10 / GP7 | `CRASH_RIGHT_PIN` |
+| IR Sensor TSOP4838 | 1 OUT, 2 GND, 3 VCC (VS) | OUT -> 20 / GP15 | `IR_RX_PIN` |
+| Magnetometer (Hall, analog) | 1 OUT, 2 GND, 3 VS | OUT -> 31 / GP26 (ADC0) | `MAG_PIN` |
+
+Notes
+- Line sensors, left to right across the robot: Edge Left, Centre Left,
+  Centre Right, Edge Right. In the code the Edge sensors are "outer" and the
+  Centre sensors "inner".
+- The ToF boards have only 4 wires (no XSHUT), so both keep address 0x29.
+  That is why each one has its own I2C bus.
+- Crash sensors: the schematic powers them from 3.3 V, so their output is at
+  most 3.3 V and goes straight to the Pico. DFRobot rates the board for 5 V;
+  the micro-switch and its pull-up work at 3.3 V, only the LED is dimmer.
+  **If they are ever moved to 5 V, a divider (10k series, 20k to GND) between
+  DIG/S and the Pico pin becomes mandatory.**
+- IR receiver: lens facing you, legs down, left to right: 1 OUT, 2 GND, 3 VS.
+  Optional supply filter if it is noisy near the motors: about 100 ohm in
+  series with VS and a few uF from VS to GND, close to the sensor.
+- Follow the letters printed on each board, not the wire colours.
+- Total 3.3 V load (4 line + 2 ToF + 2 crash + IR + Hall) is about 130 mA,
+  within what 3V3(OUT) can supply.
+
+---
+
+## 6. Getting the code onto the Pico
+
+1. Open this folder in VS Code. MicroPico connects to the Pico automatically.
+2. Command palette -> "MicroPico: Upload project to Pico". This copies
+   `config.py`, `sensors/`, `libs/`, `tests/`, `main.py` etc. `tools/` is skipped.
+3. To run a test: open the file (e.g. `tests/test_wiring.py`) and use
+   "Run current file on Pico". Stop it with Ctrl-C in the MicroPico terminal.
+   Alternative in the REPL: `from tests.test_wiring import test_wiring; test_wiring()`.
+4. After uploading new files, soft-reset (Ctrl-D in the REPL) so the Pico
+   does not keep using an older module it has already imported.
+
+Important
+- **Only one program can use the serial port at a time.** Disconnect
+  MicroPico (status bar) before starting the live viewer, and close the
+  viewer before using MicroPico again.
+- The Pico runs `main.py` at every boot and after every soft reset. While
+  `main.py` is unfinished it stops with an error (section 12), which is
+  harmless: the REPL is then free for the tests. Once `main.py` contains a
+  real loop, press Ctrl-C to stop it before running a test.
+
+---
+
+## 7. Bench test procedure
+
+Go in this order and only wire the sensors needed for each step. Each step
+says what "pass" looks like. Write the results into the sheet in section 9.
+
+### Step 0 - before power-up
+- [ ] Every sensor VCC goes to physical 36 (3V3_OUT), every GND to a GND pin.
+- [ ] Nothing is connected to 37, 39, 40 by mistake (37 is next to 36).
+- [ ] Nothing else is plugged into the motor driver 2 #2 channel or the servo
+      headers that share GP6, GP7, GP13, GP15 (section 12, item 5).
+
+### Step 1 - wiring check: `tests/test_wiring.py`
+Prints the config check and the pins to check on the board, scans both ToF
+I2C buses and prints the raw level of every sensor pin once per second.
+- Pass: `config.validate(): OK`; the four "check on the board" lines are
+  understood (section 12, item 5); each connected ToF bus shows `[41]` (0x29);
+  pin levels change when you act on a sensor.
+
+### Step 2 - line sensors: `tests/test_line_sensors.py`
+Mount the sensors 1-2 cm above the floor, in a row across the robot.
+1. Over black floor the pattern is `....`.
+2. Put white tape under each sensor in turn: the matching character becomes
+   `#`, in the order Edge Left, Centre Left, Centre Right, Edge Right. Wrong
+   position -> the wires do not match the schematic, or fix `config.py`.
+   Everything inverted -> set `LINE_WHITE_IS_HIGH = False`.
+3. Robot centred on the line: `.##.` and error `+0.00`. Slide it sideways:
+   line to the left of the robot gives a negative error.
+4. Push the robot slowly over a junction: `ENTER` then `EXIT` events.
+- Pass: all four sensors respond and are in the right order.
+- Geometry assumption used by the code: the two Centre sensors are closer
+  together than the line width (both on white when centred); each Edge
+  sensor is more than one line width further out. Measure the line width and
+  note the spacing you used.
+- The outputs are digital (0/1 only); the SEN0017 has no analog output.
+
+### Step 3 - ToF distance sensors: `tests/test_tof.py` (or the viewer, Distance tab)
+Peel the protective film off the sensor windows.
+1. Both sensors show `available True` (else check the wiring, section 11).
+2. Move a hand or box between 100 and 500 mm: the distance follows, status 11.
+3. Nothing in front: distance `None` (raw 8190/8191, status 4).
+4. Calibrate the offset: flat target exactly 100 mm from the window, then in
+   the REPL `from tests.test_tof import calibrate_offset; calibrate_offset("dist1", 100)`
+   (or the Calibrate button in the viewer). Put the printed `offset_mm` into
+   `config.TOF_SENSORS`. Repeat for "dist2".
+5. Wiggle the cables: the I2C error count must stay at 0. Rising errors mean
+   a loose wire; a sensor that lost power stops measuring until it is
+   re-initialised (press Apply in the viewer or restart the test).
+- Pass: steady readings (noise a few mm), 0 I2C errors, offsets recorded.
+- Mounting: the field of view is about 25 degrees, so the floor enters the
+  cone at about 4.5 x the mounting height. Mount at least about 5 cm high or
+  tilt slightly upwards, then check that the floor is not detected.
+
+### Step 4 - IR receiver: `tests/test_ir.py`
+1. At rest: `IR absent`, no frames.
+2. Point a TV remote at it and press a button: `IR PRESENT`, frames are
+   printed; an NEC remote shows an address and command.
+3. If the course traffic light is available: point it at the receiver and
+   copy the printed `template:` list. Later `match_template(frame, TEMPLATE)`
+   recognises it.
+- Pass: a remote is decoded or at least produces frames.
+- Note: the TSOP4838 suppresses a continuous 38 kHz signal. A beacon that is
+  simply "always on" may only give one short pulse.
+
+### Step 5 - magnetic sensor: `tests/test_magnetic.py` (or the viewer, Magnetic tab)
+The script first measures the zero-field baseline: keep magnets away.
+1. No magnet: field within about +/-100 mV, shows `-`.
+2. Magnet within 1 cm of the chip face: `MAGNET`, field several hundred mV.
+   The other pole moves the field the other way.
+3. Take it away: back to `-` within a second.
+- Pass: every approach is detected, no false detections at rest.
+- Measured so far: zero field about 2.1-2.25 V, drifts by about 100 mV, a
+  close magnet saturates at about 0.05 V / 3.0 V. Thresholds in `config.py`:
+  `MAG_ON_MV = 300`, `MAG_OFF_MV = 200`. Note the distance at which a box
+  magnet is still detected.
+
+### Step 6 - crash sensors: `tests/test_crash.py`
+1. Check that VCC goes to 3V3_OUT (36), not 5 V. Measure DIG/S with a
+   multimeter: about 3.3 V released, about 0 V pressed.
+2. Make sure nothing else on the robot board is connected to physical 9 and
+   10 (GP6 / GP7), see section 12, item 5.
+3. At rest: raw 1, pressed False. Press a lever: raw 0, pressed True, one hit
+   per press. A quick tap still counts exactly once.
+- Pass: both sensors, correct side (L = GP6, R = GP7), one hit per press.
+- An unplugged sensor may read "released" on this chip (RP2350 erratum E9),
+  so always do the press test after wiring.
+
+### Step 7 - everything together: `tests/test_all_sensors.py` (or the viewer, Overview tab)
+Run with all sensors connected, then again with the drive motors running.
+- Pass: no I2C errors, no false crash hits or IR frames while the motors run.
+
+---
+
+## 8. Live viewer (`tools/sensor_viewer.py`)
+
+```
+pip install pyserial
+python tools/sensor_viewer.py                       # pick the port, press Connect
+python tools/sensor_viewer.py --tab tof --connect   # open on the Distance tab
+python tools/sensor_viewer.py --tab mag --connect --record log.txt
+```
+
+- Close MicroPico's connection first. The viewer stops whatever runs on the
+  Pico, soft-resets it and starts `tests/stream_sensors.py`, so the code must
+  be uploaded first.
+- Wiring row: type GP numbers (not physical numbers) for each sensor group
+  and press Apply. The defaults are the schematic pins from `config.py`.
+  Leave a field empty to switch that group off. ToF pins always come from
+  `config.py`.
+- Overview tab: pin monitor (every header pin except the motor driver pins;
+  unused pins read a steady HIGH because their pull-up is on, a connected
+  sensor makes its pin change), line pattern and error, distances, crash, IR.
+- Distance tab: one card per ToF sensor with the I2C scan result, status,
+  rate and noise; continuous distance curve (solid = filtered, dashed = raw);
+  offset calibration helper.
+- Magnetic tab: continuous voltage curve with baseline and thresholds,
+  detection lamp, and a guess of whether the sensor is digital or analog.
+- `--record FILE` saves everything the Pico sends, with timestamps, for later analysis.
+- Options: `--port`, `--line`, `--crash`, `--ir`, `--mag`, `--no-tof`, `--tab overview|tof|mag`, `--connect`, `--record`.
+
+---
+
+## 9. Calibration and results sheet
+
+Fill this in during the session, then update `config.py`.
+
+| Item | Value | Goes into |
+|---|---|---|
+| Line sensor order correct (Edge L, Centre L, Centre R, Edge R) | yes / no | `LINE_*_PIN` |
+| Line sensors white = HIGH | yes / no | `LINE_WHITE_IS_HIGH` |
+| Line width / Centre spacing / Edge spacing (mm) | | (geometry check) |
+| Line sensor height above floor (mm) | | |
+| dist1 offset at 100 mm (mm) | | `TOF_SENSORS[0]["offset_mm"]` |
+| dist2 offset at 100 mm (mm) | | `TOF_SENSORS[1]["offset_mm"]` |
+| Where dist1 / dist2 are mounted (front / side ...) | | (rename in `config.py` if wanted) |
+| ToF floor visible at mounting height? | yes / no | (mounting) |
+| Crash DIG/S voltage released / pressed, left (V) | / | (expect 3.3 / 0) |
+| Crash DIG/S voltage released / pressed, right (V) | / | (expect 3.3 / 0) |
+| Crash pressed = LOW | yes / no | `CRASH_ACTIVE_LOW` |
+| GP6, GP7, GP13, GP15 free on the robot board | yes / no | (section 12, item 5) |
+| IR: remote decoded (address, command) | | |
+| IR: traffic light template frame | | (code) |
+| Magnetic baseline (mV) | | (check) |
+| Magnetic field with box magnet at working distance (mV) | | `MAG_ON_MV`, `MAG_OFF_MV` |
+
+---
+
+## 10. Using the sensors in the main loop
+
+All `update()` / `poll()` / `read()` calls are non-blocking, so one loop can
+service every sensor. Create everything once, then poll every iteration:
+
+```python
+from utime import ticks_ms, sleep_ms
+from sensors.line_sensor import LineSensorArray
+from sensors.line_processing import LineTracker, JunctionDetector
+from sensors.tof import tof_from_config
+from sensors.crash import BumperPair
+from sensors.ir_receiver import IRReceiver, decode_nec
+from sensors.magnetic import HallSensor
+
+line = LineSensorArray.from_config()
+tracker = LineTracker.from_config()
+junctions = JunctionDetector.from_config()
+tofs = tof_from_config()            # blocking start-up, a fraction of a second
+bumpers = BumperPair.from_config()
+ir = IRReceiver.from_config()
+mag = HallSensor.from_config()
+mag.calibrate_baseline()            # no magnet nearby
+
+while True:
+    now = ticks_ms()
+    bits = line.read()
+    error = tracker.update(bits, now)        # -1.0 (line left) .. +1.0 (line right)
+    event = junctions.update(bits, now)      # None or JunctionEvent
+    for s in tofs.values():
+        s.poll(now)
+    bumpers.update(now)
+    ir.process()
+    mag.update(now)
+
+    if event is not None and event.kind == "EXIT":
+        print(event.shape, event.left, event.right, event.straight)
+    if tofs["dist1"].is_closer_than(80):
+        pass                                 # object ahead of Distance Sensor 1
+    hit = bumpers.consume_hits()             # None, "LEFT", "RIGHT", "BOTH"
+    frame = ir.get_frame()                   # None or a list of pulse lengths
+    if mag.consume_detection():
+        pass                                 # magnetic box
+    sleep_ms(5)
+```
+
+Junction notes: `JunctionDetector` reports `ENTER` as soon as a branch is
+confirmed and `EXIT` once the robot has passed it, with the final
+`left` / `right` / `straight` and `shape`. Call `junctions.reset()` after a
+turn, because spinning sweeps the sensors over other lines.
+
+---
+
+## 11. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Viewer: "Cannot open COM..." / mpremote "failed to access" | another program holds the port | disconnect MicroPico, close other viewers / terminals |
+| Viewer: "no data - is the code uploaded?" | files missing on the Pico, or `main.py` running | upload the project; press Connect again (the viewer interrupts `main.py`) |
+| `AttributeError: module has no attribute ...` after an upload | the Pico still uses an older imported module | soft-reset (Ctrl-D) |
+| ToF bus scan `[]` | no power, wrong pins, C/D swapped | `+` on 36, `-` on GND; dist1: D on 16, C on 17; dist2: D on 14, C on 15; check with test_wiring |
+| ToF works, then I2C errors climb and readings stop | loose wire or power glitch | fix the wiring, then Apply in the viewer / restart the test |
+| ToF always `None` while raw looks right | range status not 11 | check `range_status`; `require_valid_status=False` disables the check |
+| Line pattern inverted | output polarity | `LINE_WHITE_IS_HIGH = False` |
+| Line characters in the wrong place | wires do not match the schematic | compare with section 5, or swap the GP numbers in `config.py` |
+| Crash always "pressed" | sensor unpowered, DIG/S on the wrong pin | measure DIG/S (3.3 V released); check VCC on 36 |
+| A motor moves when a crash lever is touched | GP6 / GP7 also wired to a motor driver | disconnect at once; move the crash sensors to free pins (e.g. GP16 / GP17) and update `config.py` and the schematic |
+| IR: never any frames | VS on the wrong pin, remote not 38 kHz | pins 1 OUT, 2 GND, 3 VS; try another remote |
+| Magnet detected with no magnet nearby | baseline drift or a magnet nearby during calibration | recalibrate (Apply in the viewer / restart the test) away from magnets; raise `MAG_OFF_MV` |
+| `SyntaxError` in `main.py` on the Pico | MicroPython-incompatible syntax | see section 12 |
+
+---
+
+## 12. Known issues and to-do
+
+Navigation code (`main.py`, `functions.py`). Checked against a real
+MicroPython 1.29 interpreter:
+1. `main.py` uses `match ... case` (line 25). **MicroPython does not support
+   `match`**; the file fails with `SyntaxError`. Rewrite with `if / elif`.
+2. `functions.py` uses `deque([self.position])`. MicroPython's deque needs a
+   maximum length: `deque((), 100)` and then `.append(self.position)`.
+   Because the last two lines of `functions.py` run a route search at import
+   time, `import functions` currently fails on the Pico. Move that test code
+   under `if __name__ == "__main__":`.
+3. `Robot.move_to()` uses `MAP[...].keys()[...]`. Dict views are not
+   indexable in CPython either; use
+   `for direction, place in MAP[self.position].items(): if place == location: ...`.
+4. `reset_map()` rewrites `MAP.py` on the Pico's flash on every run. Consider
+   keeping the visited / collected state in memory instead.
+
+Hardware / schematic
+5. **Pins to check on the robot board.** The schematic uses four pins that
+   the department examples or earlier teams used for something else
+   (`config.CHECK_PINS`, printed by `config.warnings()` and `test_wiring`):
+   - GP6 / GP7 (physical 9 / 10), crash sensors: earlier teams drove a motor
+     on GP6 (PWM) / GP7 (DIR), probably motor driver 2 channel 2. If that
+     channel is wired on the board, a crash sensor would drive the motor
+     driver input. Confirm the channel is unused / disconnected.
+   - GP13 (physical 17), Distance Sensor 1 SCL: possibly the servo 2 header.
+   - GP15 (physical 20), IR sensor: the servo 1 header in the department
+     example. Do not plug a servo into that header.
+   Free alternatives if a pin turns out to be taken: GP8, GP9, GP14, GP16,
+   GP17, GP22, GP27, GP28.
+6. The servos and a start button are not in the schematic yet.
+7. GP2 / GP3 (motor driver 1 #2) are inferred from the department examples.
+8. A ToF sensor that loses power is not re-initialised automatically yet.
+
+---
+
+## 13. Development notes
+
+- Code, comments and docs are in English.
+- MicroPython is not CPython. Avoid: `match`, type hints, `dataclasses`,
+  `typing`, `collections.deque` without a maxlen, `str.ljust/rjust/zfill`,
+  numeric literal underscores, indexing dict views.
+- Time: use `utime.ticks_ms()` and always compare with `ticks_diff()`.
+- Check that a file compiles for MicroPython before uploading:
+
+  ```
+  pip install mpy-cross
+  python -m mpy_cross -o NUL main.py
+  ```
+
+  (use `-o /dev/null` on macOS / Linux)
+- Keep pins in `config.py` only, keep them in step with the schematic, and
+  run `config.validate()` and `config.warnings()` after changing them.

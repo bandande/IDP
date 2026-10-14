@@ -4,14 +4,19 @@ Interface for the 2 x DFRobot SEN0138 crash sensors (SEN0138-L / SEN0138-R).
 Device facts
   * A micro-switch with a roller lever on a small board with an on-board
     pull-up resistor and a status LED. Pins: 1 = digital out, 2 = VCC, 3 = GND.
-  * Supply 5V only. Output HIGH (5V) when released, LOW when pressed
+  * Output HIGH (at the supply voltage) when released, LOW when pressed
     (DFRobot's example code treats LOW as "pressed").
-  * !!! The released output is 5V and RP2040 GPIOs are NOT 5V tolerant. Put a
-    voltage divider between the sensor output and the Pico pin, e.g. 10k from
-    the output to the pin and 20k from the pin to GND, and measure the pin
-    voltage before connecting it (about 2.2-3.3 V released, about 0 V pressed).
-    The resistor to GND also pulls the pin low if the sensor comes unplugged,
-    so a disconnected sensor reads as "pressed" and is noticed straight away.
+  * The team schematic powers both boards from 3V3_OUT, so the output is at
+    most 3.3 V and goes straight to the Pico pin (left GP6, right GP7). DFRobot
+    rates the board for 5V, but the switch and its pull-up work at 3.3 V; only
+    the LED is dimmer.
+  * !!! If the boards are ever powered from 5V, the released output is 5V and
+    a voltage divider is REQUIRED (e.g. 10k from the output to the pin, 20k
+    from the pin to GND). RP2040 GPIOs are not 5V tolerant and the RP2350
+    only tolerates 5V while it is powered.
+  * On early RP2350 chips (A2 stepping, erratum E9) an input that is only
+    weakly pulled down can stay at about 2.2 V and read HIGH, so an unplugged
+    sensor may read "released". Always do a press test after wiring.
 
 Data processing
   * Debounced level: the state only changes after the pin has been stable
@@ -60,7 +65,7 @@ class CrashSensor:
     """One crash switch with debouncing and short-press capture.
 
     pin: GPIO number. active_low: True for the SEN0138 (pressed -> 0 V).
-    pull: optional Pin.PULL_UP / Pin.PULL_DOWN (None: the board / divider drives the pin).
+    pull: optional Pin.PULL_UP / Pin.PULL_DOWN (None: the sensor's own pull-up drives the pin).
     use_irq: False disables the short-press capture (debounced polling only).
     """
 
