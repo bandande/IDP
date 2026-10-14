@@ -2,7 +2,9 @@
 Sensor configuration: every sensor pin number and tuning constant lives here.
 
 The pins follow the team schematic "SCH_Schematic1" V1.0 (EasyEDA, updated
-2026-10-13). Change them only together with the schematic.
+2026-10-13), except the crash sensors, which were moved on the robot on
+2026-10-14 from GP6/GP7 to GP8/GP9 (physical 11/12). Change pins only together
+with the schematic.
 
 Pin numbers in code are Pico GPIO numbers ("GPn"). The board is a Raspberry Pi
 Pico 2 (RP2350); its header pinout is identical to the Pico W shown on Moodle.
@@ -13,26 +15,26 @@ comment after each pin gives both; physical_pin() converts. Run validate()
 """
 
 # ---------------------------------------------------------------------------
-# Pins wired on the department robot board according to the department
-# example code. Sensors must not use them.
+# Pins wired on the robot board to the motor drivers (department example code
+# and the team's motor.py: motor 3 = DIR GP4 / PWM GP5, motor 4 = DIR GP7 /
+# PWM GP6). Sensors must not use them: a sensor output on a motor driver
+# input could switch the motor on.
 # ---------------------------------------------------------------------------
 BOARD_PINS = {
-    0: "motor driver 1 #1 DIR",       # physical 1
-    1: "motor driver 1 #1 PWM",       # physical 2
-    2: "motor driver 1 #2 (assumed)",  # physical 4
-    3: "motor driver 1 #2 (assumed)",  # physical 5
-    4: "motor driver 2 #1 DIR",       # physical 6
-    5: "motor driver 2 #1 PWM",       # physical 7
+    0: "motor driver 1 #1 DIR",               # physical 1
+    1: "motor driver 1 #1 PWM",               # physical 2
+    2: "motor driver 1 #2 (assumed)",          # physical 4
+    3: "motor driver 1 #2 (assumed)",          # physical 5
+    4: "motor 3 DIR (motor driver 2 #1)",     # physical 6
+    5: "motor 3 PWM (motor driver 2 #1)",     # physical 7
+    6: "motor 4 PWM (motor driver 2 #2)",     # physical 9
+    7: "motor 4 DIR (motor driver 2 #2)",     # physical 10
 }
 
-# Pins the schematic uses for sensors although the department examples or
-# earlier teams used them for something else on the robot board. They are
-# allowed, but check on the board that nothing else is connected to them
-# (warnings() lists the ones in use). A crash sensor on a pin that is also
-# wired to a motor driver input could switch that motor on.
+# Pins the department examples used for something else on the robot board.
+# Sensors may use them, but then check on the board that nothing else is
+# connected (warnings() lists the ones in use).
 CHECK_PINS = {
-    6: "motor driver 2 #2 PWM in earlier teams' code",   # physical 9
-    7: "motor driver 2 #2 DIR in earlier teams' code",   # physical 10
     13: "servo 2 header (assumed)",                      # physical 17
     15: "servo 1 header in the department example",      # physical 20
 }
@@ -80,9 +82,11 @@ TOF_STALE_MS = 200             # a reading older than this is considered stale
 # the Pico pin, no divider. (DFRobot rates the board for 5V; the switch and
 # pull-up work at 3.3V, only the LED is dimmer.) If the sensors are ever
 # powered from 5V instead, a divider (10k series, 20k to GND) is REQUIRED.
+# Signal pins moved on 2026-10-14 from GP6/GP7 (schematic) to GP8/GP9, because
+# GP6/GP7 drive motor 4.
 # ---------------------------------------------------------------------------
-CRASH_LEFT_PIN = 6             # GP6 = physical 9   (see CHECK_PINS)
-CRASH_RIGHT_PIN = 7            # GP7 = physical 10  (see CHECK_PINS)
+CRASH_LEFT_PIN = 8             # GP8 = physical 11
+CRASH_RIGHT_PIN = 9            # GP9 = physical 12
 CRASH_ACTIVE_LOW = True        # pressed -> 0V
 CRASH_DEBOUNCE_MS = 15
 
@@ -111,8 +115,8 @@ MAG_DEBOUNCE_MS = 10           # digital modules only
 MAG_ON_MV = 300                # analog: |field| at or above this -> magnet detected
 MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone (hysteresis)
 
-# Not used by the schematic: GP8, GP9 (11, 12), GP14 (19), GP16, GP17 (21, 22),
-# GP22 (29), GP27 (32), GP28 (34). GP26-GP28 are the only analogue (ADC) inputs.
+# Not used by any sensor or motor: GP14 (19), GP16, GP17 (21, 22), GP22 (29),
+# GP27 (32), GP28 (34). GP26-GP28 are the only analogue (ADC) inputs.
 # The servos and the start button are not in the schematic yet; pick from these.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
 

@@ -1,13 +1,12 @@
 """
 Step 6: 2 x SEN0138 crash sensors.
 
-Wiring (team schematic): VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38),
-DIG/S (signal) straight to the Pico, no divider:
-    Crash Sensor L -> GP6 (physical 9)      Crash Sensor R -> GP7 (physical 10)
+Wiring: VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38), DIG/S (signal)
+straight to the Pico, no divider:
+    Crash Sensor L -> GP8 (physical 11)     Crash Sensor R -> GP9 (physical 12)
+(moved from GP6/GP7 in the schematic on 2026-10-14).
 Only if the sensors are powered from 5V instead: a divider (10k series, 20k
 to GND) is REQUIRED between DIG/S and the Pico pin.
-GP6 / GP7 were a motor driver channel in earlier teams' code: check that
-nothing else on the robot board is connected to physical pins 9 and 10.
 Measure the signal with a multimeter first: about 3.3 V released, 0 V pressed.
 
 Checks: raw 1 / pressed False at rest; press a lever -> raw 0, pressed True,
