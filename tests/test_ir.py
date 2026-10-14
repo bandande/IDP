@@ -1,10 +1,9 @@
 """
 Step 4: TSOP4838 IR receiver.
 
-Wiring (team schematic; lens facing you, legs down, left to right):
-1 OUT -> GP15 (physical 20), 2 GND -> GND (physical 38), 3 VS -> 3V3_OUT
-(physical 36, NOT 5V). No extra parts needed. GP15 is the servo 1 header in
-the department example: do not plug a servo into that header.
+Wiring (lens facing you, legs down, left to right): 1 OUT -> GP14
+(physical 19, moved from GP15 in the schematic on 2026-10-14), 2 GND -> GND
+(physical 38), 3 VS -> 3V3_OUT (physical 36, NOT 5V). No extra parts needed.
 Optional if the reading is noisy near the motors: about 100 ohm in series with
 VS and a few uF from VS to GND, close to the sensor (datasheet R1/C1).
 

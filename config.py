@@ -2,9 +2,9 @@
 Sensor configuration: every sensor pin number and tuning constant lives here.
 
 The pins follow the team schematic "SCH_Schematic1" V1.0 (EasyEDA, updated
-2026-10-13), except the crash sensors, which were moved on the robot on
-2026-10-14 from GP6/GP7 to GP8/GP9 (physical 11/12). Change pins only together
-with the schematic.
+2026-10-13), except two signals moved on the robot on 2026-10-14: the crash
+sensors from GP6/GP7 to GP8/GP9 (physical 11/12) and the IR receiver from GP15
+to GP14 (physical 19). Change pins only together with the schematic.
 
 Pin numbers in code are Pico GPIO numbers ("GPn"). The board is a Raspberry Pi
 Pico 2 (RP2350); its header pinout is identical to the Pico W shown on Moodle.
@@ -94,8 +94,10 @@ CRASH_DEBOUNCE_MS = 15
 # IR receiver: 1 x Vishay TSOP4838 (38 kHz demodulator; output LOW while an IR
 # burst is being received). Pins: 1 = OUT, 2 = GND, 3 = VS.
 # Schematic: VS -> 3V3_OUT, so the output (internal 30k pull-up to VS) stays at 3.3V.
+# Signal pin moved on 2026-10-14 from GP15 (schematic, also the servo 1 header)
+# to GP14.
 # ---------------------------------------------------------------------------
-IR_RX_PIN = 15                 # GP15 = physical 20  (see CHECK_PINS)
+IR_RX_PIN = 14                 # GP14 = physical 19
 IR_FRAME_GAP_US = 8000         # silence longer than this ends a frame
 IR_PRESENT_WINDOW_MS = 150     # signal_present(): any IR activity within this window
 
@@ -115,8 +117,9 @@ MAG_DEBOUNCE_MS = 10           # digital modules only
 MAG_ON_MV = 300                # analog: |field| at or above this -> magnet detected
 MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone (hysteresis)
 
-# Not used by any sensor or motor: GP14 (19), GP16, GP17 (21, 22), GP22 (29),
-# GP27 (32), GP28 (34). GP26-GP28 are the only analogue (ADC) inputs.
+# Not used by any sensor or motor: GP15 (20, servo 1 header), GP16, GP17
+# (21, 22), GP22 (29), GP27 (32), GP28 (34). GP26-GP28 are the only analogue
+# (ADC) inputs.
 # The servos and the start button are not in the schematic yet; pick from these.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
 
