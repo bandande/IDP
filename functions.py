@@ -1,6 +1,7 @@
 from MAP import MAP
 import constants
 from collections import deque
+from motor import Motor
 
 def degrees_to_time(degrees):
     count=0
@@ -59,20 +60,25 @@ def reset_map(old_phrases=["COLLECTED", "OCCUPIED"]):
     # Write the file out again
     with open('MAP.py', 'w') as file:
         file.write(filedata)
+        
+
+    
 
 class Robot:
     def __init__(self):
         self.position = "START"
-        self.previous_position = None
+        self.previous_position = "START"
         self.direction = "north"
-        self.objective = None
-        self.mode = None
-        self.mode_store = None
-        self.mode_specific = None
+        self.objective = ""
+        self.mode = ""
+        self.mode_store = ""
+        self.mode_specific = []
+        self.mode_extra_specific = ""
         # mode=(collecting, turning, stopping, straight, dropping)
         # specific_mode=()
         
-        self.queue = [] # Macro is the largest. It is as follows- first element is the name, next elements are instructions
+        self.queue: list[str | list]= [] # Macro is the largest. It is as follows- first element is the name, next elements are instructions
+        
         
         self.left_sensor = True
         self.right_sensor = True
@@ -89,29 +95,100 @@ class Robot:
         
         self.motor_left=False
         self.motor_right=False
+        
+        
+    def forward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+        """motor3 is left. motor4 is right
+        """
+        if not motor3_speed:
+            motor3_speed=motor3.forward_speed
+        if not motor4_speed:
+            motor4_speed=motor4.forward_speed
+        self.motor_left=True
+        self.motor_right=True
+        motor3.Forward(motor3_speed)
+        motor4.Forward(motor4_speed)
+    def left(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.forward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.forward_speed
+            self.motor_left=False
+            self.motor_right=True
+            motor3.off()
+            motor4.Forward(motor4_speed)
+    def right(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.forward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.forward_speed
+            self.motor_left=True
+            self.motor_right=False
+            motor3.Forward(motor3_speed)
+            motor4.off()
+    def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.forward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.backward_speed
+            self.motor_left=True
+            self.motor_right=True
+            motor3.Forward(motor3_speed)
+            motor4.Reverse(motor4_speed)
+    def backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.backward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.backward_speed
+            self.motor_left=True
+            self.motor_right=True
+            motor3.Reverse(motor3_speed)
+            motor4.Reverse(motor4_speed)
+    def left_backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.backward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.backward_speed
+            self.motor_left=True
+            self.motor_right=False
+            motor3.Reverse(motor3_speed)
+            motor4.off()
+    def right_backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+            """motor3 is left. motor4 is right
+            """
+            if not motor3_speed:
+                motor3_speed=motor3.backward_speed
+            if not motor4_speed:
+                motor4_speed=motor4.backward_speed
+            self.motor_left=False
+            self.motor_right=True
+            motor3.off()
+            motor4.Reverse(motor4_speed)
+    
+    def stop(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+                """motor3 is left. motor4 is right
+                """
+                if not motor3_speed:
+                    motor3_speed=motor3.backward_speed
+                if not motor4_speed:
+                    motor4_speed=motor4.backward_speed
+                self.motor_left=False
+                self.motor_right=False
+                motor3.off()
+                motor4.off()
 
     
-    # Detection
     
-    def detect_junction(self):
-        pass
-    
-    # Moving
-    
-    def left_turn(self):
-        pass
-    
-    def right_turn(self):
-        pass
-    
-    def about_turn(self):
-        pass
-    
-    def small_left_turn(self, degree):
-        pass
-    
-    def small_right_turn(self, degree):
-        pass
         
     
     def find_route(self, location):
@@ -168,11 +245,10 @@ class Robot:
         return ["straight", ["turning", turning, "90"]]
     
     def identify_junction(self):
+        # This can be called to see which kinds of junction it can be
         pass
     
-    
-robot=Robot()
-print(robot.find_route("RED_2"))
+
         
     
 
