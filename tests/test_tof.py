@@ -3,7 +3,8 @@ Step 3: 2 x VL53L0X time-of-flight sensors.
 
 Wiring per sensor (team schematic, boards labelled + - C D): + -> 3V3_OUT
 (physical 36, never 5V), - -> GND (physical 38), D = SDA and C = SCL:
-    Distance Sensor 1 "dist1": D -> GP12 (physical 16), C -> GP13 (physical 17), I2C0
+    Distance Sensor 1 "dist1": D -> GP16 (physical 21), C -> GP17 (physical 22), I2C0
+    (D must NOT also touch VCC: the schematic draws them on one wire by mistake)
     Distance Sensor 2 "dist2": D -> GP10 (physical 14), C -> GP11 (physical 15), I2C1
 No XSHUT pin on these boards (one sensor per bus instead). No extra parts:
 the Pico enables its internal I2C pull-ups; add 4.7k pull-ups to 3V3 or set

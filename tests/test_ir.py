@@ -2,8 +2,8 @@
 Step 4: TSOP4838 IR receiver.
 
 Wiring (lens facing you, legs down, left to right): 1 OUT -> GP14
-(physical 19, moved from GP15 in the schematic on 2026-10-14), 2 GND -> GND
-(physical 38), 3 VS -> 3V3_OUT (physical 36, NOT 5V). No extra parts needed.
+(physical 19), 2 GND -> GND (physical 38), 3 VS -> 3V3_OUT (physical 36,
+NOT 5V). No extra parts needed.
 Optional if the reading is noisy near the motors: about 100 ohm in series with
 VS and a few uF from VS to GND, close to the sensor (datasheet R1/C1).
 

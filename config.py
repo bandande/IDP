@@ -1,43 +1,55 @@
 """
-Sensor configuration: every sensor pin number and tuning constant lives here.
+Pin configuration: every sensor pin, the robot's other pins and the sensor
+tuning constants live here.
 
-The pins follow the team schematic "SCH_Schematic1" V1.0 (EasyEDA, updated
-2026-10-13), except two signals moved on the robot on 2026-10-14: the crash
-sensors from GP6/GP7 to GP8/GP9 (physical 11/12) and the IR receiver from GP15
-to GP14 (physical 19). Change pins only together with the schematic.
+The pins follow the FINAL team schematic "SCH_Schematic1" (EasyEDA, file
+SCH_Schematic1_2026-10-15.pdf, page "sensor_schematic_1"). Change them only
+together with the schematic.
 
 Pin numbers in code are Pico GPIO numbers ("GPn"). The board is a Raspberry Pi
 Pico 2 (RP2350); its header pinout is identical to the Pico W shown on Moodle.
-The jumper headers on the department robot board are labelled with the
-PHYSICAL pin numbers (1-40) instead, e.g. GP18 is "24 on the jumper". The
-comment after each pin gives both; physical_pin() converts. Run validate()
-(hard errors) and warnings() (things to check on the board) after any change.
+The jumper headers on the robot board and the schematic use PHYSICAL pin
+numbers (1-40) instead, e.g. GP18 is physical pin 24. The comment after each
+pin gives both; physical_pin() converts. Run validate() (errors) and
+warnings() (things to check on the board) after any change.
 """
 
 # ---------------------------------------------------------------------------
-# Pins wired on the robot board to the motor drivers (department example code
-# and the team's motor.py: motor 3 = DIR GP4 / PWM GP5, motor 4 = DIR GP7 /
-# PWM GP6). Sensors must not use them: a sensor output on a motor driver
-# input could switch the motor on.
+# Pins used by the robot for things other than sensors. Sensors must not use
+# them. Motors and servos follow the schematic net labels (DIR1, PWM1, DIR2,
+# PWM2, ServoPin1, ServoPin2) and match the team's motor.py.
 # ---------------------------------------------------------------------------
 BOARD_PINS = {
-    0: "motor driver 1 #1 DIR",               # physical 1
-    1: "motor driver 1 #1 PWM",               # physical 2
-    2: "motor driver 1 #2 (assumed)",          # physical 4
-    3: "motor driver 1 #2 (assumed)",          # physical 5
-    4: "motor 3 DIR (motor driver 2 #1)",     # physical 6
-    5: "motor 3 PWM (motor driver 2 #1)",     # physical 7
-    6: "motor 4 PWM (motor driver 2 #2)",     # physical 9
-    7: "motor 4 DIR (motor driver 2 #2)",     # physical 10
+    0: "motor driver 1 #1 DIR (department board, not in the schematic)",  # physical 1
+    1: "motor driver 1 #1 PWM (department board, not in the schematic)",  # physical 2
+    2: "motor driver 1 #2 (assumed, not in the schematic)",               # physical 4
+    3: "motor driver 1 #2 (assumed, not in the schematic)",               # physical 5
+    4: "motor 1 DIR (DIR1)",                                              # physical 6
+    5: "motor 1 PWM (PWM1)",                                              # physical 7
+    6: "motor 2 PWM (PWM2)",                                              # physical 9
+    7: "motor 2 DIR (DIR2)",                                              # physical 10
+    13: "servo 2 signal (ServoPin2)",                                     # physical 17
+    15: "servo 1 signal (ServoPin1)",                                     # physical 20
 }
 
-# Pins the department examples used for something else on the robot board.
-# Sensors may use them, but then check on the board that nothing else is
-# connected (warnings() lists the ones in use).
-CHECK_PINS = {
-    13: "servo 2 header (assumed)",                      # physical 17
-    15: "servo 1 header in the department example",      # physical 20
+# Indicator LEDs, driven through a 4-channel optocoupler (220 ohm on both
+# sides): GPIO HIGH -> LED on. Outputs, so sensors must not use these pins.
+LED_PINS = {
+    "yellow": 22,                  # GP22 = physical 29 -> optocoupler ch1 -> Yellow_LED
+    "red": 27,                     # GP27 = physical 32 -> optocoupler ch2 -> Red_LED
+    "green": 28,                   # GP28 = physical 34 -> optocoupler ch3 -> Green_LED
 }
+
+# Pins used by sensors although they have another use on the robot board.
+# warnings() lists the ones in use. Empty with the final schematic.
+CHECK_PINS = {}
+
+# Things to check on the real wiring (printed by warnings() and test_wiring).
+BOARD_CHECKS = (
+    "the schematic draws Distance Sensor 1 SDA on the same wire as its VCC; "
+    "SDA must go ONLY to physical 21 (GP16) and VCC ONLY to physical 36 (3V3). "
+    "With the power off, physical 21 and 36 must NOT be connected (continuity test).",
+)
 
 # ---------------------------------------------------------------------------
 # Line tracking sensors: 4 x DFRobot SEN0017 (digital, white -> 1, black -> 0).
@@ -57,7 +69,8 @@ LINE_LOST_MS = 150             # all four sensors black for this long -> line lo
 # ---------------------------------------------------------------------------
 # Time-of-flight distance sensors: 2 x VL53L0X (I2C, boards labelled + - C D).
 # Schematic: VCC -> 3V3_OUT, GND -> GND; one sensor per hardware I2C bus, so
-# both keep address 0x29 (the boards have no XSHUT pin).
+# both keep address 0x29 (the boards have no XSHUT pin). See BOARD_CHECKS
+# about Distance Sensor 1's SDA wire.
 # Names follow the schematic ("Distance Sensor 1" / "Distance Sensor 2").
 # Hardware I2C pin options: I2C0 SDA 0/4/8/12/16/20, SCL 1/5/9/13/17/21
 #                           I2C1 SDA 2/6/10/14/18/26, SCL 3/7/11/15/19/27
@@ -65,8 +78,8 @@ LINE_LOST_MS = 150             # all four sensors black for this long -> line lo
 # ---------------------------------------------------------------------------
 I2C_FREQ_HZ = 400000
 TOF_SENSORS = (
-    # Distance Sensor 1: SDA (D) GP12 = physical 16, SCL (C) GP13 = physical 17, I2C0
-    {"name": "dist1", "i2c_id": 0, "sda": 12, "scl": 13, "xshut": None, "address": 0x29, "offset_mm": 0},
+    # Distance Sensor 1: SDA (D) GP16 = physical 21, SCL (C) GP17 = physical 22, I2C0
+    {"name": "dist1", "i2c_id": 0, "sda": 16, "scl": 17, "xshut": None, "address": 0x29, "offset_mm": 0},
     # Distance Sensor 2: SDA (D) GP10 = physical 14, SCL (C) GP11 = physical 15, I2C1
     {"name": "dist2", "i2c_id": 1, "sda": 10, "scl": 11, "xshut": None, "address": 0x29, "offset_mm": 0},
 )
@@ -82,11 +95,9 @@ TOF_STALE_MS = 200             # a reading older than this is considered stale
 # the Pico pin, no divider. (DFRobot rates the board for 5V; the switch and
 # pull-up work at 3.3V, only the LED is dimmer.) If the sensors are ever
 # powered from 5V instead, a divider (10k series, 20k to GND) is REQUIRED.
-# Signal pins moved on 2026-10-14 from GP6/GP7 (schematic) to GP8/GP9, because
-# GP6/GP7 drive motor 4.
 # ---------------------------------------------------------------------------
-CRASH_LEFT_PIN = 8             # GP8 = physical 11
-CRASH_RIGHT_PIN = 9            # GP9 = physical 12
+CRASH_LEFT_PIN = 9             # GP9 = physical 12  (Crash Sensor L DIG/S)
+CRASH_RIGHT_PIN = 8            # GP8 = physical 11  (Crash Sensor R DIG/S)
 CRASH_ACTIVE_LOW = True        # pressed -> 0V
 CRASH_DEBOUNCE_MS = 15
 
@@ -94,8 +105,6 @@ CRASH_DEBOUNCE_MS = 15
 # IR receiver: 1 x Vishay TSOP4838 (38 kHz demodulator; output LOW while an IR
 # burst is being received). Pins: 1 = OUT, 2 = GND, 3 = VS.
 # Schematic: VS -> 3V3_OUT, so the output (internal 30k pull-up to VS) stays at 3.3V.
-# Signal pin moved on 2026-10-14 from GP15 (schematic, also the servo 1 header)
-# to GP14.
 # ---------------------------------------------------------------------------
 IR_RX_PIN = 14                 # GP14 = physical 19
 IR_FRAME_GAP_US = 8000         # silence longer than this ends a frame
@@ -117,9 +126,8 @@ MAG_DEBOUNCE_MS = 10           # digital modules only
 MAG_ON_MV = 300                # analog: |field| at or above this -> magnet detected
 MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone (hysteresis)
 
-# Not used by any sensor or motor: GP15 (20, servo 1 header), GP16, GP17
-# (21, 22), GP22 (29), GP27 (32), GP28 (34). GP26-GP28 are the only analogue
-# (ADC) inputs.
+# Not used in the final schematic: GP12 (physical 16; the department examples
+# put a start button there), plus GP0-GP3 if motor driver 1 is not used.
 # The servos and the start button are not in the schematic yet; pick from these.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
 
@@ -176,6 +184,8 @@ def validate():
     claim(CRASH_RIGHT_PIN, "crash right")
     claim(IR_RX_PIN, "IR receiver")
     claim(MAG_PIN, "magnetic sensor")
+    for colour, pin in LED_PINS.items():
+        claim(pin, colour + " LED")
     if MAG_MODE not in ("digital", "analog"):
         problems.append("MAG_MODE must be 'digital' or 'analog', not %r" % (MAG_MODE,))
     elif MAG_MODE == "analog" and MAG_PIN not in (26, 27, 28):
@@ -232,8 +242,8 @@ def sensor_pins():
 
 
 def warnings():
-    """Things to check on the robot board (not errors): sensors on CHECK_PINS."""
-    out = []
+    """Things to check on the robot board (not errors): BOARD_CHECKS and sensors on CHECK_PINS."""
+    out = list(BOARD_CHECKS)
     for gp, what in sorted(sensor_pins().items()):
         if gp in CHECK_PINS:
             out.append("%s (%s) is also %s - make sure nothing else is connected to it"

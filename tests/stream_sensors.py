@@ -15,9 +15,8 @@ or []. ir_pin: GPIO or -1. mag_pin: GPIO or -1; on an ADC pin (GP26-28) the
 magnetic sensor is always read as an analog voltage, so both digital and analog
 modules can be seen. seconds: stop after this long (None = until Ctrl-C).
 The pin monitor shows the raw level of every header
-GPIO except the motor driver pins and the I2C pins in use (servo header pins
-are included: reading them as inputs is harmless). Unused pins get the
-internal pull-up, so an unconnected pin reads a steady 1.
+GPIO except the motor, servo and LED pins and the I2C pins in use. Unused
+pins get the internal pull-up, so an unconnected pin reads a steady 1.
 Stop with Ctrl-C.
 """
 
@@ -35,8 +34,8 @@ from sensors.magnetic import HallSensor, ADC_PINS
 
 
 def default_monitor_pins(use_tof=True):
-    # Never touch the motor driver pins: a pulled-up DIR/PWM input could start a motor.
-    busy = set(gp for gp, what in config.BOARD_PINS.items() if what.startswith("motor"))
+    # Never touch motor, servo or LED pins: a pulled-up DIR/PWM input could start a motor.
+    busy = set(config.BOARD_PINS) | set(config.LED_PINS.values())
     if use_tof:
         for t in config.TOF_SENSORS:
             busy.add(t["sda"])

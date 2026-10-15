@@ -3,8 +3,7 @@ Step 6: 2 x SEN0138 crash sensors.
 
 Wiring: VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38), DIG/S (signal)
 straight to the Pico, no divider:
-    Crash Sensor L -> GP8 (physical 11)     Crash Sensor R -> GP9 (physical 12)
-(moved from GP6/GP7 in the schematic on 2026-10-14).
+    Crash Sensor L -> GP9 (physical 12)     Crash Sensor R -> GP8 (physical 11)
 Only if the sensors are powered from 5V instead: a divider (10k series, 20k
 to GND) is REQUIRED between DIG/S and the Pico pin.
 Measure the signal with a multimeter first: about 3.3 V released, 0 V pressed.
