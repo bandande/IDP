@@ -171,10 +171,10 @@ def main():
                 
                 ##=====Can be commented out
                 # THis provides the most basic logic to turning
-                if robot.left_sensor == 1:
-                    robot.queue.append(["turning", "left", 90])
-                if robot.right_sensor == 1:
-                    robot.queue.append(["turning", "right", 90])
+                # if robot.left_sensor == 1:
+                #     robot.queue.append(["turning", "left", 90])
+                # if robot.right_sensor == 1:
+                #     robot.queue.append(["turning", "right", 90])
                 
                 ##=====
                 
@@ -182,8 +182,9 @@ def main():
                 robot.position=robot.objective
                 robot.mode="" # Moves onto next instruction (which is turning)
             # If not moving straight
-            elif motor3.return_state() == 0 or motor4.return_state():
+            elif motor3.return_state() == 0 or motor4.return_state()==0:
                 robot.forward(motor3,motor4)
+                print("motor not forward")
             # Detect and make corrections
             corrections(robot,motor3,motor4, reverse=reversing)               
             
