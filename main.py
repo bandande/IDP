@@ -204,8 +204,6 @@ def main():
     in_branch=False       # test route: inside a right branch we turned into
     lost_since=None       # time at which all four sensors went black (None = line seen)
     holdoff_until=0       # ignore junctions until now reaches this
-    outer_left_seen=False   # "reverse" mode: outer sensors have seen the main road line
-    outer_right_seen=False
     robot=functions.Robot()
     print(robot.position)
     functions.reset_map()
@@ -246,6 +244,10 @@ def main():
             wait_for_start(button)
             robot.mode = ""
             robot.queue = test_route_start() if LINE_TEST_ONLY else []
+            # The robot is put back on the start node facing the start
+            # direction, so reset the heading it keeps track of; otherwise
+            # the printed directions continue from the previous run.
+            robot.direction = "north"
             turning = False
             in_branch = False
             lost_since = None
@@ -265,13 +267,11 @@ def main():
                 lost_since = None
                 if in_branch:
                     # Dead end inside the right branch: reverse straight
-                    # back until the outer sensors find the main road line.
+                    # back until all four sensors are on the main road line.
                     print("dead end - reversing to the junction")
                     in_branch = False
                     robot.queue = []   # drop the "straight" that corrections() may have queued
                     robot.mode = "reverse"
-                    outer_left_seen = False
-                    outer_right_seen = False
                     time_count = now + REVERSE_TIMEOUT_MS
                     robot.backward(motor3, motor4)
                 else:
@@ -474,17 +474,21 @@ def main():
         elif robot.mode == "reverse":
             # ADDED (2026-10-15, test route step 3): reversing straight back
             # out of a dead-end right branch. The main road crosses the line
-            # sensors side to side, so BOTH outer sensors see it (one may see
-            # it a little before the other if the robot is at an angle). Then
-            # the sensors are on the main road and the wheels are past it, so
-            # the normal turn (drive forward NODE_FORWARD_MS, then turn on the
-            # spot) brings the wheels back onto the junction and turns left,
-            # back onto the main road.
-            if robot.left_sensor == 1:
-                outer_left_seen = True
-            if robot.right_sensor == 1:
-                outer_right_seen = True
-            if outer_left_seen and outer_right_seen:
+            # sensors side to side, so the robot is back at the junction when
+            # ALL FOUR sensors see the white line at the same time (1111).
+            # CHANGED (2026-10-15, bench test): before, it stopped as soon as
+            # the two OUTER sensors had each seen white at some moment, even
+            # at different moments; on the robot that ended the reversing
+            # early, at an angle, with only one sensor on the line (1000).
+            # Note: if the robot reverses at a clear angle the four sensors
+            # may never be on the line together; then it keeps reversing
+            # until REVERSE_TIMEOUT_MS and stops.
+            # Then the sensors are on the main road and the wheels are past
+            # it, so the normal turn (drive forward NODE_FORWARD_MS, then
+            # turn on the spot) brings the wheels back onto the junction and
+            # turns left, back onto the main road.
+            if (robot.left_sensor == 1 and robot.front_left_sensor == 1
+                    and robot.front_right_sensor == 1 and robot.right_sensor == 1):
                 print("back on the main road - turning left")
                 robot.stop(motor3, motor4)
                 robot.queue = ["straight", ["turning", "left", 90]]
