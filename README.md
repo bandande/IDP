@@ -54,6 +54,8 @@ Software on the laptop
 | `functions.py`, `MAP.py`, `constants.py` | Pico | navigation: `Robot` state, route finding on the course map, turn helpers |
 | `config.py` | Pico | every sensor pin and tuning constant; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
 | `sensors/` | Pico | one module per sensor: hardware interface + data processing |
+| `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `leds.py` (yellow / red / green LEDs) |
+| `control/` | Pico | `line_follower.py` (backup line follower, pure logic), `start_stop.py` (crash sensor as start / stop button) |
 | `libs/VL53L0X.py` | Pico | VL53L0X driver from the department template (unchanged) |
 | `tests/test_*.py` | Pico | on-robot test scripts, one per sensor, numbered in the recommended order |
 | `tests/stream_sensors.py` | Pico | streams every reading to the PC as JSON lines for the viewer |
@@ -71,6 +73,10 @@ Sensor modules
 | `sensors/ir_receiver.py` | `IRReceiver.from_config()`, `.process()`, `.signal_present()`, `.get_frame()`; `decode_nec(frame)`, `match_template(frame, template)`, `frame_signature(frame)` |
 | `sensors/magnetic.py` | `HallSensor.from_config()`, `.calibrate_baseline()`, `.update()`, `.detected`, `.consume_detection()`, `.field_mv`, `.polarity` |
 | `sensors/filters.py` | `MedianFilter`, `Debouncer`, `Hysteresis` |
+| `actuators/motor.py` | `DriveBase.from_config()`, `.drive(left, right)` (percent, -100 .. +100), `.stop()` |
+| `actuators/leds.py` | `StatusLeds.from_config()`, `.set("green", True)`, `.show(red=True)`, `.off()` |
+| `control/line_follower.py` | `LineFollower.from_config()`, `.start(plan=None)`, `.update(bits)` -> (left, right), `.stop()`, `.state`, `.reason` |
+| `control/start_stop.py` | `StartStopButton.from_config()`, `.pressed()` (True once per press) |
 
 Every module starts with a docstring that explains the device, its wiring, the
 data processing and a usage example.
@@ -293,6 +299,63 @@ The script first measures the zero-field baseline: keep magnets away.
 Run with all sensors connected, then again with the drive motors running.
 - Pass: no I2C errors, no false crash hits or IR frames while the motors run.
 
+### Step 8 - start / stop button and LEDs: `tests/test_start_button.py`
+The button is the crash sensor named in `config.START_STOP_SENSOR` (default
+"left" = physical 12). Nothing moves.
+1. At start each LED lights for half a second: yellow, red, green.
+2. Red = STOP. One press: green = RUN (yellow flashes on every press). Press
+   again: back to STOP.
+- Pass: all three LEDs work; exactly one toggle per press.
+
+### Step 9 - drive motors: `tests/test_motors.py`
+**First run with the wheels off the table.** Nothing moves until the button
+is pressed; another press (or Ctrl-C) stops everything.
+1. `test_motors()`: left wheel forward, right wheel forward, both forward,
+   spin left, spin right (1 s each, 40 %).
+   - Wrong wheel in step 1 -> swap the `MOTOR_LEFT_*` and `MOTOR_RIGHT_*` pins.
+   - A wheel turns backwards -> flip `MOTOR_LEFT_INVERT` / `MOTOR_RIGHT_INVERT`.
+2. `ramp_test()`: both wheels from 5 % to 60 %. The first speed at which both
+   wheels turn goes into `MOTOR_MIN_DUTY`.
+- Pass: the five steps move exactly as described.
+
+### Step 10 - backup line follower: `tests/test_line_follow.py`
+1. Dry run first: `test_line_follow(dry_run=True)`, motors stay off. Push the
+   robot along the line by hand and watch the printed speeds: line to the
+   left -> left speed lower than right.
+2. Real run: robot centred on a straight line. Press the button; the yellow
+   LED blinks for `START_DELAY_MS`, then it follows. Press again (or bump the
+   front) to stop. Ctrl-C always stops the motors.
+3. Then bends, a crossing (goes straight), a corner (turns by itself) and a
+   plan, e.g. `test_line_follow(plan=["L", "S", "R"])`.
+- LEDs: green = following, yellow = turning / on a junction, red = stopped.
+  When it stops by itself the reason is printed (line lost, T junction ...).
+- Pass: follows a straight line and gentle bends at `FOLLOW_BASE_SPEED`
+  without losing it; turns at corners; stops on the button.
+
+How the backup follower works (`control/line_follower.py`)
+- Steering: `error` from the line sensors (-1 = line far left .. +1 = far
+  right), `correction = FOLLOW_KP * error + FOLLOW_KD * d(error)/dt`,
+  limited to `FOLLOW_MAX_CORRECTION`; left wheel = base + correction, right
+  wheel = base - correction.
+- Line lost for `LINE_LOST_MS`: spin towards the side it was last seen at
+  `FOLLOW_SEARCH_SPEED`; stop after `FOLLOW_SEARCH_TIMEOUT_MS`.
+- Junctions: without a plan it goes straight over crossings and side
+  branches, turns by itself at corners, and does `T_STEM_ACTION` when the
+  line ends in a T. A plan gives one action per junction, corners included:
+  "L", "R", "S" or "stop".
+- Turns: drive on for `TURN_FORWARD_MS` after the junction was first seen
+  (so the wheels are over it), then spin at `TURN_SPEED` until a centre
+  sensor finds the new line; give up after `TURN_TIMEOUT_MS`.
+
+Tuning (`config.py`)
+| Symptom | Change |
+|---|---|
+| Wobbles from side to side on a straight line | lower `FOLLOW_KP`, or add `FOLLOW_KD` (try 2-5) |
+| Leaves the line in bends | raise `FOLLOW_KP` or lower `FOLLOW_BASE_SPEED` |
+| Turns too early / too late at a junction | raise / lower `TURN_FORWARD_MS` |
+| Overshoots the new line when turning | lower `TURN_SPEED` |
+| Wheels hum but do not move at low speed | set `MOTOR_MIN_DUTY` from `ramp_test()` |
+
 ---
 
 ## 8. Live viewer (`tools/sensor_viewer.py`)
@@ -418,6 +481,8 @@ turn, because spinning sweeps the sensors over other lines.
 | IR: never any frames | VS on the wrong pin, OUT not on physical 19, remote not 38 kHz | pins 1 OUT, 2 GND, 3 VS; try another remote |
 | Magnet detected with no magnet nearby | baseline drift or a magnet nearby during calibration | recalibrate (Apply in the viewer / restart the test) away from magnets; raise `MAG_OFF_MV` |
 | `SyntaxError` in `main.py` on the Pico | MicroPython-incompatible syntax | see section 12 |
+| Robot turns the wrong way when the line is to one side | motors swapped or inverted | redo step 9 |
+| Robot starts by itself | the start/stop crash sensor was bumped | that is the button; keep hands clear of the front |
 
 ---
 

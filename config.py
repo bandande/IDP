@@ -128,8 +128,40 @@ MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone
 
 # Not used in the final schematic: GP12 (physical 16; the department examples
 # put a start button there), plus GP0-GP3 if motor driver 1 is not used.
-# The servos and the start button are not in the schematic yet; pick from these.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
+
+# ---------------------------------------------------------------------------
+# Drive motors (schematic net labels; same pins as the team's motor.py).
+# Department motor driver: DIR pin + PWM pin per motor, DIR = 0 is "forward".
+# Run tests/test_motors.py first: if the wrong wheel moves in its "left" step,
+# swap LEFT and RIGHT here; if a wheel turns backwards, flip its INVERT flag.
+# ---------------------------------------------------------------------------
+MOTOR_LEFT_DIR_PIN = 4         # DIR1, GP4 = physical 6
+MOTOR_LEFT_PWM_PIN = 5         # PWM1, GP5 = physical 7
+MOTOR_RIGHT_DIR_PIN = 7        # DIR2, GP7 = physical 10
+MOTOR_RIGHT_PWM_PIN = 6        # PWM2, GP6 = physical 9
+MOTOR_LEFT_INVERT = False
+MOTOR_RIGHT_INVERT = False
+MOTOR_PWM_FREQ_HZ = 1000
+MOTOR_MIN_DUTY = 0             # % where the wheels just start to turn (tests/test_motors.py ramp)
+
+# ---------------------------------------------------------------------------
+# Backup line follower (control/line_follower.py). Speeds are % of full PWM.
+# Start conservative and raise the speed once it follows reliably.
+# ---------------------------------------------------------------------------
+START_STOP_SENSOR = "left"     # crash sensor used as the start / stop button: "left" or "right"
+START_DELAY_MS = 1000          # wait after the start press, so the hand is clear of the robot
+LOOP_PERIOD_MS = 5             # main loop period
+FOLLOW_BASE_SPEED = 35         # forward speed on a straight line
+FOLLOW_KP = 35.0               # speed difference per unit of line error (error is -1 .. +1)
+FOLLOW_KD = 0.0                # damping: speed difference per (error change per second)
+FOLLOW_MAX_CORRECTION = 45     # limit of the speed difference
+FOLLOW_SEARCH_SPEED = 30       # spin speed while searching for a lost line
+FOLLOW_SEARCH_TIMEOUT_MS = 2000  # stop if the line is not found again within this time
+TURN_SPEED = 35                # spin speed for 90 degree turns at junctions
+TURN_FORWARD_MS = 300          # drive on after the junction so the wheels are over it, then spin
+TURN_TIMEOUT_MS = 3000         # stop if a spin turn does not find the new line
+T_STEM_ACTION = "stop"         # line ends in a T (left and right only): "stop", "L" or "R"
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +218,14 @@ def validate():
     claim(MAG_PIN, "magnetic sensor")
     for colour, pin in LED_PINS.items():
         claim(pin, colour + " LED")
+    for name, pin in (("MOTOR_LEFT_DIR_PIN", MOTOR_LEFT_DIR_PIN), ("MOTOR_LEFT_PWM_PIN", MOTOR_LEFT_PWM_PIN),
+                      ("MOTOR_RIGHT_DIR_PIN", MOTOR_RIGHT_DIR_PIN), ("MOTOR_RIGHT_PWM_PIN", MOTOR_RIGHT_PWM_PIN)):
+        if not BOARD_PINS.get(pin, "").startswith("motor"):
+            problems.append("%s = GP%d is not a motor pin in BOARD_PINS" % (name, pin))
+    if START_STOP_SENSOR not in ("left", "right"):
+        problems.append("START_STOP_SENSOR must be 'left' or 'right', not %r" % (START_STOP_SENSOR,))
+    if T_STEM_ACTION not in ("stop", "L", "R"):
+        problems.append("T_STEM_ACTION must be 'stop', 'L' or 'R', not %r" % (T_STEM_ACTION,))
     if MAG_MODE not in ("digital", "analog"):
         problems.append("MAG_MODE must be 'digital' or 'analog', not %r" % (MAG_MODE,))
     elif MAG_MODE == "analog" and MAG_PIN not in (26, 27, 28):
