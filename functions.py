@@ -234,7 +234,14 @@ class Robot:
             return ["Error position and location not found"]
 
         # Queue of locations to explore
-        queue = deque([self.position])
+        # FIX (2026-10-15): MicroPython's collections.deque takes the maximum
+        # length as a required second argument and must start empty, so the
+        # old `deque([self.position])` raised "TypeError: function missing 1
+        # required positional arguments" on the Pico. len(MAP) is always
+        # enough room: in this breadth-first search every location is added
+        # to the queue at most once. (Works the same in CPython.)
+        queue = deque((), len(MAP))
+        queue.append(self.position)
 
         # Remember how each location was reached
         previous = {self.position: None}
@@ -272,7 +279,19 @@ class Robot:
     def move_to(self, location):
         # From one point to adjacent point
         if MAP.get(self.position) and MAP.get(location):
-            final_direction=MAP[self.position].keys()[MAP[self.position].values().index(location)]
+            # FIX (2026-10-15): dict views (.keys(), .values()) cannot be
+            # indexed or searched with .index() - neither in CPython nor in
+            # MicroPython - so the old one-liner
+            #   MAP[self.position].keys()[MAP[self.position].values().index(location)]
+            # always raised an error. Instead, look through the four
+            # directions for the one whose neighbour is `location`.
+            final_direction = None
+            for direction in ("north", "east", "south", "west"):
+                if MAP[self.position].get(direction) == location:
+                    final_direction = direction
+                    break
+            if final_direction is None:
+                raise ValueError("move_to: %s is not next to %s" % (location, self.position))
             turning=direction_to_turn(self.direction, final_direction)
         else:
             print("error, location or own position not found")

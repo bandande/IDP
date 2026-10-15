@@ -3,6 +3,29 @@ import MAP
 import utime
 import motor
 import sensors.line_sensor as line_sensor
+# ADDED (2026-10-15): needed by the fixes / bench-test changes below.
+#   - the bit masks name each line sensor inside LineSensorArray.read()
+#   - StartStopButton uses a crash sensor as the start / stop button
+#   - machine is used to switch the motors off when the program ends
+#   - config holds START_STOP_SENSOR and START_DELAY_MS
+import machine
+import config
+from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
+from control.start_stop import StartStopButton
+
+# ADDED (2026-10-15): settings for the line-following bench test.
+# LINE_TEST_ONLY = True: the robot ONLY follows the line. Whenever the task
+#     queue is empty it is refilled with "straight" instead of
+#     ["deliver", "collect"], so after every junction the robot just carries
+#     on straight. (The deliver / collect planner cannot run yet: with
+#     "collect" it re-plans forever without moving.) Set it to False to run
+#     the full task logic again.
+# DRIVE_SPEED: percent of full motor power used by Robot.forward / left /
+#     right / backward when no explicit speed is given. motor.Motor defaults
+#     to 100 %, far too fast for tuning the line following. Start low and
+#     raise it once the robot follows the line reliably.
+LINE_TEST_ONLY = True
+DRIVE_SPEED = 40
 
 
 def corrections(robot, motor3, motor4, motor_speed3=None, motor_speed4=None, reverse=None):
@@ -40,8 +63,43 @@ def update_sensors(sensors, robot):
     robot.front_left_sensor_previous=robot.front_left_sensor
     robot.front_right_sensor_previous=robot.front_right_sensor
     robot.right_sensor_previous=robot.right_sensor
-    robot.left_sensor,robot.front_left_sensor,robot.front_right_sensor,robot.right_sensor= [bool(sensors.read() & (1 << i)) for i in range(4)]
-    
+    # FIX (2026-10-15): left and right were swapped.
+    # LineSensorArray.read() returns ONE 4-bit number:
+    #     bit 3 = OUTER_LEFT  = Line Sensor "Edge Left"    (GP20, physical 26)
+    #     bit 2 = INNER_LEFT  = Line Sensor "Centre Left"  (GP21, physical 27)
+    #     bit 1 = INNER_RIGHT = Line Sensor "Centre Right" (GP19, physical 25)
+    #     bit 0 = OUTER_RIGHT = Line Sensor "Edge Right"   (GP18, physical 24)
+    # The old line
+    #     ... = [bool(sensors.read() & (1 << i)) for i in range(4)]
+    # gave bits 0, 1, 2, 3 (right to left) to left_sensor, front_left_sensor,
+    # front_right_sensor, right_sensor, so a line under the Centre RIGHT
+    # sensor set front_left_sensor = 1 and every correction steered AWAY from
+    # the line. It also called read() four times per loop; one read is faster
+    # and gives a consistent snapshot of all four sensors.
+    # Values are 1 (sensor sees the white line) or 0 (black floor).
+    bits = sensors.read()
+    robot.left_sensor = 1 if bits & OUTER_LEFT else 0
+    robot.front_left_sensor = 1 if bits & INNER_LEFT else 0
+    robot.front_right_sensor = 1 if bits & INNER_RIGHT else 0
+    robot.right_sensor = 1 if bits & OUTER_RIGHT else 0
+
+
+def wait_for_start(button):
+    """ADDED (2026-10-15, safety): block until the start/stop button is pressed.
+
+    The button is the crash sensor named in config.START_STOP_SENSOR (default
+    "left" = Crash Sensor L, physical pin 12). Because the Pico runs main.py
+    by itself at power-up, waiting here stops the robot from driving off as
+    soon as it is switched on. After the press it waits config.START_DELAY_MS
+    so the hand that pressed the button is clear of the robot.
+    """
+    print("press the start/stop button (%s crash sensor) to start" % config.START_STOP_SENSOR)
+    while not button.pressed():
+        utime.sleep_ms(5)
+    print("starting in %d ms" % config.START_DELAY_MS)
+    utime.sleep_ms(config.START_DELAY_MS)
+
+
     
 def main():
     turning=False   # Checks if the turning sequence is running so we just start it once
@@ -60,18 +118,45 @@ def main():
     
     motor3 = motor.Motor(dirPin=4, PWMPin=5)  # Motor 3 is controlled from Motor Driv2 #1, which is on GP4/5
     motor4 = motor.Motor(dirPin=7, PWMPin=6)  # Motor 4 is controlled from Motor Driv2 #1, which is on GP4/5
-    
+    # ADDED (2026-10-15): use DRIVE_SPEED (top of this file) instead of the
+    # Motor class default of 100 %. Robot.forward / left / right / backward /
+    # about use these two values whenever no explicit speed is passed.
+    for m in (motor3, motor4):
+        m.forward_speed = DRIVE_SPEED
+        m.backward_speed = DRIVE_SPEED
+
     sensors=line_sensor.LineSensorArray([20,21,19,18],True)
-    
+
+    # ADDED (2026-10-15, safety): start / stop button. Nothing moves until
+    # the button is pressed (see wait_for_start above).
+    button = StartStopButton.from_config()
+    wait_for_start(button)
+
     #start running
     while True:
+        # ADDED (2026-10-15, safety): a press of the start/stop button while
+        # running (or the front bumping into something, since the button is a
+        # crash sensor) stops both motors. The robot then waits for the next
+        # press and starts again from a clean state (empty queue, mode "").
+        if button.pressed():
+            robot.stop(motor3, motor4)
+            print("stopped by the start/stop button")
+            wait_for_start(button)
+            robot.mode = ""
+            robot.queue = []
+            turning = False
+
         now = utime.ticks_diff(utime.ticks_ms(), start)
         update_sensors(sensors, robot)
-            
+
         if len(robot.queue)==0:
-            robot.box_count+=1
-            robot.queue=["deliver","collect"]
-            # robot.queue=["straight"]
+            if LINE_TEST_ONLY:
+                # ADDED (2026-10-15): line-following test only (see
+                # LINE_TEST_ONLY at the top): keep following the line.
+                robot.queue=["straight"]
+            else:
+                robot.box_count+=1
+                robot.queue=["deliver","collect"]
         
         
         # Action
@@ -149,8 +234,19 @@ def main():
                         robot.mode=""
                         
                 elif next_item == "straight":
+                    # FIX (2026-10-15): actually switch into "straight" mode.
+                    # Before this fix the robot only called forward() and
+                    # never set robot.mode, so the line corrections and the
+                    # junction detection (both inside the
+                    # `elif robot.mode == "straight":` branch below) never
+                    # ran and the robot drove straight on blindly.
+                    # The `robot.queue.append(next_item)` a few lines above
+                    # put "straight" back on the queue; remove that copy
+                    # again, otherwise it would be repeated forever.
+                    robot.queue.pop()
+                    robot.mode = "straight"
                     robot.forward(motor3,motor4)
-                    
+
         elif robot.mode == "straight":
             # Detection
             if ((robot.left_sensor == 1 and robot.left_sensor_previous == 0) 
@@ -278,4 +374,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # ADDED (2026-10-15, safety): always switch both drive motors off when the
+    # program ends for ANY reason (Ctrl-C in the REPL, an exception, ...).
+    # Without this the PWM outputs keep their last duty cycle and the wheels
+    # keep turning after the program has stopped. GP5 and GP6 are the PWM
+    # pins of motor3 (PWM1) and motor4 (PWM2); setting the duty to 0 stops them.
+    try:
+        main()
+    finally:
+        for pwm_pin in (5, 6):
+            machine.PWM(machine.Pin(pwm_pin)).duty_u16(0)
+        print("motors stopped")
