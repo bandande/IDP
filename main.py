@@ -44,11 +44,11 @@ def update_sensors(sensors, robot):
     
     
 def main():
-    turning=False
-    traffic=False
-    moving=False
-    reversing=False
-    time_count=0
+    turning=False   # Checks if the turning sequence is running so we just start it once
+    traffic=False 
+    moving=False 
+    reversing=False # Is the robot reversing or not?
+    time_count=0    # How we keep track of a deadline timewise. Changed by saying time_count=now+3
     using_time=False
     robot=functions.Robot()
     print(robot.position)
