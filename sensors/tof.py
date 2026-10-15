@@ -32,16 +32,16 @@ Data processing
 
 Usage
     from sensors.tof import tof_from_config
-    tofs = tof_from_config()               # {"front": ToFSensor, "side": ToFSensor}
+    tofs = tof_from_config()               # {"dist1": ToFSensor, "dist2": ToFSensor}
     while True:
         for sensor in tofs.values():
             sensor.poll()
-        d = tofs["front"].distance_mm      # int mm, or None
+        d = tofs["dist1"].distance_mm      # int mm, or None
 
     For a yes/no "object is near" signal without chatter at the threshold:
         from sensors.filters import Hysteresis
         near = Hysteresis(on_below=80, off_above=100)
-        is_near = near.update(tofs["front"].distance_mm)
+        is_near = near.update(tofs["dist1"].distance_mm)
 """
 
 from machine import Pin, I2C, SoftI2C
