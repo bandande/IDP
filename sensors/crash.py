@@ -7,7 +7,7 @@ Device facts
   * Output HIGH (at the supply voltage) when released, LOW when pressed
     (DFRobot's example code treats LOW as "pressed").
   * The team schematic powers both boards from 3V3_OUT, so the output is at
-    most 3.3 V and goes straight to the Pico pin (left GP6, right GP7). DFRobot
+    most 3.3 V and goes straight to the Pico pin (left GP8, right GP9). DFRobot
     rates the board for 5V, but the switch and its pull-up work at 3.3 V; only
     the LED is dimmer.
   * !!! If the boards are ever powered from 5V, the released output is 5V and

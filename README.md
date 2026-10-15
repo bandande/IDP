@@ -7,7 +7,10 @@ wired, how to get the code onto the Pico, and a step-by-step test plan with
 pass criteria, calibration sheet and troubleshooting.
 
 All sensor pins follow the team schematic **SCH_Schematic1 V1.0** (EasyEDA,
-updated 2026-10-13). `config.py` is the single place where they are defined.
+updated 2026-10-13), except two signals moved on the robot on 2026-10-14: the
+crash sensors from GP6/GP7 to **GP8/GP9 (physical 11/12)** and the IR receiver
+from GP15 to **GP14 (physical 19)**. `config.py` is the single place where pins
+are defined.
 
 ---
 
@@ -103,28 +106,29 @@ data processing and a usage example.
     3 GND                                                 23 GND
     4 GP2   motor driver 1 #2  (assumed)                  24 GP18  Line Sensor Edge Right    OUT
     5 GP3   motor driver 1 #2  (assumed)                  25 GP19  Line Sensor Centre Right  OUT
-    6 GP4   motor driver 2 #1 DIR  (board)                26 GP20  Line Sensor Edge Left     OUT
-    7 GP5   motor driver 2 #1 PWM  (board)                27 GP21  Line Sensor Centre Left   OUT
+    6 GP4   motor 3 DIR (driver 2 #1)  (board)            26 GP20  Line Sensor Edge Left     OUT
+    7 GP5   motor 3 PWM (driver 2 #1)  (board)            27 GP21  Line Sensor Centre Left   OUT
     8 GND                                                 28 GND
-    9 GP6   Crash Sensor L  DIG/S  (CHECK)                29 GP22  free
-   10 GP7   Crash Sensor R  DIG/S  (CHECK)                30 RUN   do not use
-   11 GP8   free                                          31 GP26  Magnetometer OUT (ADC0)
-   12 GP9   free                                          32 GP27  free (ADC1)
+    9 GP6   motor 4 PWM (driver 2 #2)  (board)            29 GP22  free
+   10 GP7   motor 4 DIR (driver 2 #2)  (board)            30 RUN   do not use
+   11 GP8   Crash Sensor L  DIG/S                         31 GP26  Magnetometer OUT (ADC0)
+   12 GP9   Crash Sensor R  DIG/S                         32 GP27  free (ADC1)
    13 GND                                                 33 AGND
    14 GP10  Distance Sensor 2  D (SDA) I2C1               34 GP28  free (ADC2)
    15 GP11  Distance Sensor 2  C (SCL) I2C1               35 VREF  ADC_VREF, do not use
    16 GP12  Distance Sensor 1  D (SDA) I2C0               36 3V3   3V3_OUT: power for ALL sensors
    17 GP13  Distance Sensor 1  C (SCL) I2C0 (CHECK)       37 3V3EN 3V3_EN, do not use
    18 GND                                                 38 GND   ground for ALL sensors
-   19 GP14  free                                          39 VSYS
-   20 GP15  IR Sensor OUT  (CHECK)                        40 VBUS  5 V only with USB
+   19 GP14  IR Sensor OUT                                 39 VSYS
+   20 GP15  free (servo 1 header)                         40 VBUS  5 V only with USB
 ```
 
-- "(board)": wired on the robot board according to the department example code.
+- "(board)": wired to the motor drivers on the robot board (department example
+  code and the team's `motor.py`: motor 3 on GP4/GP5, motor 4 on GP7/GP6).
 - "(CHECK)": the schematic uses the pin for a sensor, but the department
   examples or earlier teams used it for something else (section 12, item 5).
-- Free for the servos, the start button and other additions: GP8, GP9, GP14,
-  GP16, GP17, GP22, GP27, GP28.
+- Free for the servos, the start button and other additions: GP15 (servo 1
+  header), GP16, GP17, GP22, GP27, GP28.
 
 ---
 
@@ -142,9 +146,9 @@ works as well. No sensor needs extra parts.
 | Line Sensor Edge Right | 1 OUT, 2 VCC, 3 GND | OUT -> 24 / GP18 | `LINE_OUTER_RIGHT_PIN` |
 | Distance Sensor 1 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 16 / GP12, C -> 17 / GP13 (I2C0) | `"dist1"` |
 | Distance Sensor 2 (`+ - C D`) | 1 VCC, 2 GND, 3 SCL (C), 4 SDA (D) | D -> 14 / GP10, C -> 15 / GP11 (I2C1) | `"dist2"` |
-| Crash Sensor L | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 9 / GP6 | `CRASH_LEFT_PIN` |
-| Crash Sensor R | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 10 / GP7 | `CRASH_RIGHT_PIN` |
-| IR Sensor TSOP4838 | 1 OUT, 2 GND, 3 VCC (VS) | OUT -> 20 / GP15 | `IR_RX_PIN` |
+| Crash Sensor L | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 11 / GP8 (moved from GP6) | `CRASH_LEFT_PIN` |
+| Crash Sensor R | 1 DIG/S, 2 VCC, 3 GND | DIG/S -> 12 / GP9 (moved from GP7) | `CRASH_RIGHT_PIN` |
+| IR Sensor TSOP4838 | 1 OUT, 2 GND, 3 VCC (VS) | OUT -> 19 / GP14 (moved from GP15) | `IR_RX_PIN` |
 | Magnetometer (Hall, analog) | 1 OUT, 2 GND, 3 VS | OUT -> 31 / GP26 (ADC0) | `MAG_PIN` |
 
 Notes
@@ -197,13 +201,13 @@ says what "pass" looks like. Write the results into the sheet in section 9.
 ### Step 0 - before power-up
 - [ ] Every sensor VCC goes to physical 36 (3V3_OUT), every GND to a GND pin.
 - [ ] Nothing is connected to 37, 39, 40 by mistake (37 is next to 36).
-- [ ] Nothing else is plugged into the motor driver 2 #2 channel or the servo
-      headers that share GP6, GP7, GP13, GP15 (section 12, item 5).
+- [ ] Nothing else is plugged into the servo header that shares GP13
+      (section 12, item 5).
 
 ### Step 1 - wiring check: `tests/test_wiring.py`
 Prints the config check and the pins to check on the board, scans both ToF
 I2C buses and prints the raw level of every sensor pin once per second.
-- Pass: `config.validate(): OK`; the four "check on the board" lines are
+- Pass: `config.validate(): OK`; the "check on the board" line (GP13) is
   understood (section 12, item 5); each connected ToF bus shows `[41]` (0x29);
   pin levels change when you act on a sensor.
 
@@ -267,11 +271,10 @@ The script first measures the zero-field baseline: keep magnets away.
 ### Step 6 - crash sensors: `tests/test_crash.py`
 1. Check that VCC goes to 3V3_OUT (36), not 5 V. Measure DIG/S with a
    multimeter: about 3.3 V released, about 0 V pressed.
-2. Make sure nothing else on the robot board is connected to physical 9 and
-   10 (GP6 / GP7), see section 12, item 5.
+2. Signals: left on physical 11 (GP8), right on physical 12 (GP9).
 3. At rest: raw 1, pressed False. Press a lever: raw 0, pressed True, one hit
    per press. A quick tap still counts exactly once.
-- Pass: both sensors, correct side (L = GP6, R = GP7), one hit per press.
+- Pass: both sensors, correct side (L = GP8, R = GP9), one hit per press.
 - An unplugged sensor may read "released" on this chip (RP2350 erratum E9),
   so always do the press test after wiring.
 
@@ -327,7 +330,7 @@ Fill this in during the session, then update `config.py`.
 | Crash DIG/S voltage released / pressed, left (V) | / | (expect 3.3 / 0) |
 | Crash DIG/S voltage released / pressed, right (V) | / | (expect 3.3 / 0) |
 | Crash pressed = LOW | yes / no | `CRASH_ACTIVE_LOW` |
-| GP6, GP7, GP13, GP15 free on the robot board | yes / no | (section 12, item 5) |
+| GP13 free on the robot board | yes / no | (section 12, item 5) |
 | IR: remote decoded (address, command) | | |
 | IR: traffic light template frame | | (code) |
 | Magnetic baseline (mV) | | (check) |
@@ -400,8 +403,8 @@ turn, because spinning sweeps the sensors over other lines.
 | Line pattern inverted | output polarity | `LINE_WHITE_IS_HIGH = False` |
 | Line characters in the wrong place | wires do not match the schematic | compare with section 5, or swap the GP numbers in `config.py` |
 | Crash always "pressed" | sensor unpowered, DIG/S on the wrong pin | measure DIG/S (3.3 V released); check VCC on 36 |
-| A motor moves when a crash lever is touched | GP6 / GP7 also wired to a motor driver | disconnect at once; move the crash sensors to free pins (e.g. GP16 / GP17) and update `config.py` and the schematic |
-| IR: never any frames | VS on the wrong pin, remote not 38 kHz | pins 1 OUT, 2 GND, 3 VS; try another remote |
+| Left and right crash swapped | L / R wires swapped | swap the wires on physical 11 / 12, or swap `CRASH_LEFT_PIN` / `CRASH_RIGHT_PIN` |
+| IR: never any frames | VS on the wrong pin, OUT not on physical 19, remote not 38 kHz | pins 1 OUT, 2 GND, 3 VS; try another remote |
 | Magnet detected with no magnet nearby | baseline drift or a magnet nearby during calibration | recalibrate (Apply in the viewer / restart the test) away from magnets; raise `MAG_OFF_MV` |
 | `SyntaxError` in `main.py` on the Pico | MicroPython-incompatible syntax | see section 12 |
 
@@ -425,18 +428,18 @@ MicroPython 1.29 interpreter:
    keeping the visited / collected state in memory instead.
 
 Hardware / schematic
-5. **Pins to check on the robot board.** The schematic uses four pins that
-   the department examples or earlier teams used for something else
-   (`config.CHECK_PINS`, printed by `config.warnings()` and `test_wiring`):
-   - GP6 / GP7 (physical 9 / 10), crash sensors: earlier teams drove a motor
-     on GP6 (PWM) / GP7 (DIR), probably motor driver 2 channel 2. If that
-     channel is wired on the board, a crash sensor would drive the motor
-     driver input. Confirm the channel is unused / disconnected.
+5. **Pins to check on the robot board.** One sensor pin was used for
+   something else in the department examples (`config.CHECK_PINS`, printed
+   by `config.warnings()` and `test_wiring`):
    - GP13 (physical 17), Distance Sensor 1 SCL: possibly the servo 2 header.
-   - GP15 (physical 20), IR sensor: the servo 1 header in the department
-     example. Do not plug a servo into that header.
-   Free alternatives if a pin turns out to be taken: GP8, GP9, GP14, GP16,
-   GP17, GP22, GP27, GP28.
+   Moved on the robot on 2026-10-14 (**update the schematic**):
+   - Crash sensors GP6 / GP7 -> GP8 / GP9: the team's `motor.py` drives
+     motor 4 on GP7 (DIR) / GP6 (PWM), so the schematic's crash pins would
+     have fed the motor driver.
+   - IR receiver GP15 -> GP14: GP15 is the servo 1 header in the department
+     example.
+   Free alternatives if a pin turns out to be taken: GP14, GP16, GP17, GP22,
+   GP27, GP28.
 6. The servos and a start button are not in the schematic yet.
 7. GP2 / GP3 (motor driver 1 #2) are inferred from the department examples.
 8. A ToF sensor that loses power is not re-initialised automatically yet.
