@@ -8,11 +8,11 @@ def degrees_to_time(degrees):
     count=constants.full_turn_time*degrees/360
     return count
 
-def turn_to_direction(direction, turn):
+def turn_to_direction(current_direction, turn):
     directions = ["north", "east", "south", "west"]
 
-    if direction not in directions:
-        raise ValueError(f"Invalid direction: {direction}")
+    if current_direction not in directions:
+        raise ValueError(f"Invalid direction: {current_direction}")
 
     if turn == "left":
         change = -1
@@ -20,10 +20,12 @@ def turn_to_direction(direction, turn):
         change = 1
     elif turn == "about":
         change = 2
+    elif turn == "straight":
+        change = 0
     else:
         raise ValueError(f"Invalid turn: {turn}")
 
-    return directions[(directions.index(direction) + change) % 4]
+    return directions[(directions.index(current_direction) + change) % 4]
 
 def direction_to_turn(current_direction, target_direction):
     directions = ["north", "east", "south", "west"]
@@ -70,6 +72,7 @@ class Robot:
         self.previous_position = "START"
         self.direction = "north"
         self.objective = ""
+        self.final_objective = ""
         self.mode = ""
         self.mode_store = ""
         self.mode_specific = []
@@ -96,40 +99,74 @@ class Robot:
         self.motor_left=False
         self.motor_right=False
         
+        self.drop_off_info=[0,0,0]
         
-    def forward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+        
+    def forward(self, motor3, motor4, motor3_speed=None, motor4_speed=None, reverse=False):
         """motor3 is left. motor4 is right
         """
-        if not motor3_speed:
-            motor3_speed=motor3.forward_speed
-        if not motor4_speed:
-            motor4_speed=motor4.forward_speed
-        self.motor_left=True
-        self.motor_right=True
-        motor3.Forward(motor3_speed)
-        motor4.Forward(motor4_speed)
-    def left(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
-            """motor3 is left. motor4 is right
-            """
+        if reverse:
             if not motor3_speed:
-                motor3_speed=motor3.forward_speed
+                motor3_speed=motor3.backward_speed
             if not motor4_speed:
-                motor4_speed=motor4.forward_speed
-            self.motor_left=False
+                motor4_speed=motor4.backward_speed
+            self.motor_left=True
             self.motor_right=True
-            motor3.off()
-            motor4.Forward(motor4_speed)
-    def right(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
-            """motor3 is left. motor4 is right
-            """
+            motor3.Reverse(motor3_speed)
+            motor4.Reverse(motor4_speed)
+        else:
             if not motor3_speed:
                 motor3_speed=motor3.forward_speed
             if not motor4_speed:
                 motor4_speed=motor4.forward_speed
             self.motor_left=True
-            self.motor_right=False
+            self.motor_right=True
             motor3.Forward(motor3_speed)
-            motor4.off()
+            motor4.Forward(motor4_speed)
+            
+    def left(self, motor3, motor4, motor3_speed=None, motor4_speed=None, reverse=False):
+            """motor3 is left. motor4 is right
+            """
+            if reverse:
+                if not motor3_speed:
+                    motor3_speed=motor3.backward_speed
+                if not motor4_speed:
+                    motor4_speed=motor4.backward_speed
+                self.motor_left=True
+                self.motor_right=False
+                motor3.Reverse(motor3_speed)
+                motor4.off()
+            else:
+                if not motor3_speed:
+                    motor3_speed=motor3.forward_speed
+                if not motor4_speed:
+                    motor4_speed=motor4.forward_speed
+                self.motor_left=False
+                self.motor_right=True
+                motor3.off()
+                motor4.Forward(motor4_speed)
+                
+    def right(self, motor3, motor4, motor3_speed=None, motor4_speed=None, reverse=False):
+            """motor3 is left. motor4 is right
+            """
+            if reverse:
+                if not motor3_speed:
+                    motor3_speed=motor3.backward_speed
+                if not motor4_speed:
+                    motor4_speed=motor4.backward_speed
+                self.motor_left=False
+                self.motor_right=True
+                motor3.off()
+                motor4.Reverse(motor4_speed)
+            else:
+                if not motor3_speed:
+                    motor3_speed=motor3.forward_speed
+                if not motor4_speed:
+                    motor4_speed=motor4.forward_speed
+                self.motor_left=True
+                self.motor_right=False
+                motor3.Forward(motor3_speed)
+                motor4.off()
     def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
             """motor3 is left. motor4 is right
             """
@@ -179,9 +216,9 @@ class Robot:
                 """motor3 is left. motor4 is right
                 """
                 if not motor3_speed:
-                    motor3_speed=motor3.backward_speed
+                    motor3_speed=motor3.forward_speed
                 if not motor4_speed:
-                    motor4_speed=motor4.backward_speed
+                    motor4_speed=motor4.forward_speed
                 self.motor_left=False
                 self.motor_right=False
                 motor3.off()
@@ -194,7 +231,7 @@ class Robot:
     def find_route(self, location):
         # Check that both locations exist
         if self.position not in MAP or location not in MAP:
-            return None
+            return ["Error position and location not found"]
 
         # Queue of locations to explore
         queue = deque([self.position])
@@ -230,7 +267,7 @@ class Robot:
                     queue.append(neighbour)
 
         # No route exists
-        return None
+        return ["Error no route found"]
     
     def move_to(self, location):
         # From one point to adjacent point
@@ -242,7 +279,9 @@ class Robot:
         
         
         self.objective = location
-        return ["straight", ["turning", turning, "90"]]
+        # If it is backwards, have a negative on the 90.
+        return ["straight", ["turning", turning, 90]]
+    
     
     def identify_junction(self):
         # This can be called to see which kinds of junction it can be
