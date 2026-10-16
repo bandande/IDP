@@ -43,6 +43,23 @@ def test_motors():
     
     print("Forward")
     robot.forward(motor3, motor4)
+    # from control.start_stop import StartStopButton
+    # button = StartStopButton.from_config()
+    # is_pressed=True
+    # try:
+    #     while True:
+    #         if not is_pressed and button.pressed():
+    #             robot.forward(motor3, motor4)
+    #             is_pressed=True
+    #             sleep(1)
+    #         elif is_pressed and button.pressed():
+                
+    #             robot.forward(motor3, motor4, reverse=True)
+    #             is_pressed=False
+    #             sleep(1)
+    # finally:
+    
+
     sleep(1)
     print("Right")
     robot.right(motor3, motor4)
@@ -52,24 +69,24 @@ def test_motors():
 
     sleep(1)
     print("Reverse")
-    robot.backward(motor3, motor4)
+    robot.forward(motor3, motor4, reverse=True)
     sleep(1)
     robot.stop(motor3, motor4)
     
-    # count=0
-    # while count<1:
-    #     count+=1
-    #     print("Forward")
-    #     motor3.Forward()
-    #     motor4.Forward()
+    count=0
+    while count<1:
+        count+=1
+        print("Forward")
+        motor3.Forward()
+        motor4.Forward()
 
-    #     sleep(1)
-    #     print("Reverse")
-    #     motor3.Reverse()
-    #     motor4.Reverse()
-    #     sleep(1)
-    # motor3.off()
-    # motor4.off()
+        sleep(1)
+        print("Reverse")
+        motor3.Reverse()
+        motor4.Reverse()
+        sleep(1)
+    motor3.off()
+    motor4.off()
 
 if __name__ == "__main__":
     test_motors()

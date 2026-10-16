@@ -67,7 +67,8 @@ def reset_map(old_phrases=["COLLECTED", "OCCUPIED"]):
     
 
 class Robot:
-    def __init__(self):
+    
+    def reset(self):
         self.position = "JUNCTION_LEFT_BOTTOM"
         self.direction = "west"
         
@@ -104,6 +105,9 @@ class Robot:
         self.motor_right=False
         
         self.drop_off_info=[0,0,0]
+    
+    def __init__(self):
+        self.reset()
         
         
     def forward(self, motor3, motor4, motor3_speed=None, motor4_speed=None, reverse=False):

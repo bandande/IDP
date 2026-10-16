@@ -69,9 +69,9 @@ DRIVE_SPEED = 60
 #     junction are not counted again.
 START_TURN = "left"
 START_FORWARD_MS = 0
-NODE_FORWARD_MS = 1700
+NODE_FORWARD_MS = 1600
 TURN_SPEED = 60
-TURN_MIN_MS = 250
+TURN_MIN_MS = 1200
 TURN_TIMEOUT_MS = 4000
 LINE_LOST_MS = 150
 REVERSE_TIMEOUT_MS = 5000
@@ -80,14 +80,15 @@ JUNCTION_HOLDOFF_MS = 400
 
 def corrections(robot, motor3, motor4, motor_speed3=TURN_SPEED, motor_speed4=TURN_SPEED, reverse=None):
     if reverse:
-        if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+        if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
             # If left front sensor does not detect and right does
             robot.queue.append(robot.mode)
+            
             robot.mode="correction"
             robot.right(motor3,motor4,motor_speed3, motor_speed4, reverse=reverse)
             #Then turn right
             
-        elif robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
+        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
             # If left front sensor does not detect and right does
             robot.queue.append(robot.mode)
             robot.mode="correction"
@@ -174,6 +175,7 @@ def test_route_start():
 
 
 
+
 def main():
     # Status booleans
     turning=False   # Checks if the turning sequence is running so we just start it once
@@ -183,6 +185,7 @@ def main():
     time_count=0    # How we keep track of a deadline timewise. Changed by saying time_count=now+3
     using_time=False    #Are we actually using the time right now or not?
     is_started=False    # Have we started
+    count=0
     
     
     # ADDED (2026-10-15): state for the fixed turns and the test route.
@@ -223,7 +226,7 @@ def main():
     is_started=True
     #start running
     while True:
-        if button.pressed():
+        if button.pressed() and not is_started:
             is_started=True
             print("Started")
         
@@ -235,19 +238,26 @@ def main():
             # in test-route mode the route restarts with the start turn).
             if button.pressed():
                 robot.stop(motor3, motor4)
+                
                 print("stopped by the start/stop button")
-                utime.sleep(2)
-                is_started=False
+                
+                
                 robot.mode = ""
                 robot.queue = test_route_start() if LINE_TEST_ONLY else []
                 # The robot is put back on the start node facing the start
                 # direction, so reset the heading it keeps track of; otherwise
                 # the printed directions continue from the previous run.
-                robot.direction = "north"
+                robot.direction = "west"
                 turning = False
                 in_branch = False
                 lost_since = None
-
+                count=0
+                utime.sleep(1)
+                is_started=False
+                utime.sleep(1)
+                continue
+            
+            count+=1
             now = utime.ticks_diff(utime.ticks_ms(), start)
             update_sensors(sensors, robot)
 
@@ -288,7 +298,7 @@ def main():
                     robot.queue=["straight"]
                 else:
                     robot.box_count+=1
-                    robot.queue=["deliver","collect"]
+                    robot.queue=["go_back","deliver","collect"]
             # Action
             if robot.mode == "":
                 next_item=robot.queue.pop()
@@ -309,7 +319,13 @@ def main():
                     # If needs to reverse (dead_end), then if coming from drop off and going to
                     if ((next_item.startswith("JUNCTION_GREEN_") or next_item.startswith("JUNCTION_RED_")) 
                         and (robot.position.startswith("GREEN_") or robot.position.startswith("RED_"))):
-                        robot.queue = robot.queue[:-2].append("reverse_straight")
+                        robot.queue = robot.queue[:-2]+["reverse_straight"]
+                        print(robot.queue)
+                        
+                    if ((next_item.startswith("GREEN_") or next_item.startswith("RED_")) 
+                        and (robot.position.startswith("JUNCTION_GREEN_") or robot.position.startswith("JUNCTION_RED_"))):
+                        robot.queue = robot.queue[:-2]+[robot.queue[-1]]
+                        print(robot.queue)
                         
                 else:
                     robot.mode=next_item
@@ -375,16 +391,25 @@ def main():
                             print("FINAL_OBJECTIVE: " + robot.final_objective)
                             robot.queue+=robot.find_route(robot.final_objective)
                             robot.mode=""
+                            
+                    elif next_item == "go_back":
+                        robot.final_objective="START"
+                        robot.queue.append("stop")
+                        robot.find_route(robot.final_objective)
+                        robot.queue+=robot.find_route(robot.final_objective)
+                        robot.mode=""
                         
                     elif next_item == "straight":
+
                         robot.forward(motor3,motor4)
                     elif next_item == "reverse_straight":
-                        print(robot.mode)
-                        robot.forward(motor3,motor4, reverse=reversing)
+                        print(robot.mode)                        
                         reversing=True
+                        robot.forward(motor3,motor4, reverse=reversing)
                         robot.mode="straight"
-
+            
             elif robot.mode == "straight":
+
                 # Detection
                 # ADDED (2026-10-15): in test-route mode junctions are ignored for
                 # JUNCTION_HOLDOFF_MS after a turn / crossing (see the top).
@@ -395,8 +420,10 @@ def main():
                 
                 
                     robot.previous_position=robot.position
+                    print(robot.position)
+
                     robot.position=robot.objective
-                    print(robot.position) 
+                    # print("ROBOT_OBJECTIVE"+robot.objective)
                     
                     # In case it wants to reverse
                     reversing=False
@@ -419,19 +446,25 @@ def main():
                 elif motor3.return_state() == 0 or motor4.return_state()==0:
                     robot.forward(motor3,motor4, reverse=reversing)
                     print("motor not forward")
-
-                corrections(robot,motor3,motor4, reverse=reversing)
+                if not reversing:
+                    corrections(robot,motor3,motor4, reverse=reversing)
             
                 
             
             
             elif robot.mode == "correction":
+
                 if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
                     robot.stop(motor3,motor4)
                     robot.mode="" # Moves back to straight or turning
                 # Detect if there is a dead_end. If there is, then stop going straight.
-                if robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and robot.queue[-1]=="straight":
+                elif robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and robot.queue[-1]=="straight":
+                    #' I can specify further with more ifs
                     robot.stop(motor3,motor4)
+                    robot.previous_position=robot.position
+                    print(robot.position)
+
+                    robot.position=robot.objective
                     robot.queue.pop()
                     robot.mode=""
 
@@ -520,7 +553,7 @@ def main():
                     if robot.mode_specific[0]=="straight":
                         # MAYBE check if will trigger junction (need to implement)
                         robot.forward(motor3,motor4)
-                        time_count=now+NODE_FORWARD_MS
+                        time_count=now+int(NODE_FORWARD_MS/4)
                     elif robot.mode_specific[0]=="left":
                         robot.forward(motor3,motor4)
                         time_count=now+NODE_FORWARD_MS
@@ -529,8 +562,8 @@ def main():
                         time_count=now+NODE_FORWARD_MS
                     elif robot.mode_specific[0]=="about":
                         robot.forward(motor3,motor4, reverse=True)
-                        reversing=False
-                        time_count=now+NODE_FORWARD_MS
+                        reversing=True
+                        time_count=now+int(NODE_FORWARD_MS/4)
 
                 elif robot.mode_extra_specific=="move_straight":
                     # Make sure does not change off line
@@ -541,7 +574,7 @@ def main():
                         turn_deadline=now+TURN_TIMEOUT_MS
                         if robot.mode_specific[0]=="straight":
                             # MAYBE check if will trigger junction (need to implement)
-                            robot.forward(motor3,motor4)
+                            robot.forward(motor3,motor4,reverse=reversing)
                             robot.mode=""
                             turning=False
                             # Move back to straight movement
@@ -584,12 +617,16 @@ def main():
                             turning = False
             elif robot.mode == "pick_up":
                 #Do some actual grabbing stuff etc
+                robot.previous_position=robot.position
+                robot.position=robot.objective
+                print(robot.position)
                 utime.sleep(1)
                 print("GRABBING STUFF")
                 # This should have the grabbing and so on code
                 robot.drop_off_info[1]=0
                 map[robot.final_objective]["type"]="COLLECTED"
                 robot.mode=""
+                robot.has_box=True
             
                 pass
             elif robot.mode == "drop_off":
@@ -599,7 +636,15 @@ def main():
                 # This should have the grabbing and so on code
             
                 map[robot.final_objective]["type"]="FILLED"
+                robot.box_count+=1
+                robot.has_box=False
                 robot.mode=""
+                
+                
+            elif robot.mode == "stop":
+                is_started=False
+                robot.stop(motor3, motor4)
+                print("REACHED START")
     
 
 
