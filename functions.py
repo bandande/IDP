@@ -69,13 +69,13 @@ def reset_map(old_phrases=["COLLECTED", "OCCUPIED"]):
 class Robot:
     
     def reset(self):
-        self.position = "JUNCTION_LEFT_BOTTOM"
-        self.direction = "west"
+        # self.position = "JUNCTION_LEFT_BOTTOM"
+        # self.direction = "west"
         
 
         self.previous_position = "START"
-        # self.position = "START"
-        # self.direction = "north"
+        self.position = "START"
+        self.direction = "north"
         self.objective = ""
         self.final_objective = ""
         self.mode = ""

@@ -12,7 +12,7 @@ MAP = {
         "north": "TOP_CENTRE",
         "south": None,
         "east": "MIDDLE_RIGHT",
-        "west": "MIDDLE_LEFT",
+        "west": "JUNCTION_LEFT_BOTTOM",
     },
 
     "TOP_CENTRE": {
@@ -436,7 +436,7 @@ MAP = {
     "JUNCTION_TOP_DROP_1": {
         "type": "FOUR_JUNCTION",
         "north": "JUNCTION_TOP_DROP_2",
-        "south": "JUNCTION_GREEN_2",
+        "south": "TOP_CENTRE",
         "east": "RIGHT_TOP_DROP_1",
         "west": "LEFT_TOP_DROP_1",
     },

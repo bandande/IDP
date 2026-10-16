@@ -69,7 +69,12 @@ DRIVE_SPEED = 60
 #     junction are not counted again.
 START_TURN = "left"
 START_FORWARD_MS = 0
+# NODE_FORWARD_MS = 1600
+# TURN_MIN_MS = 1800
+
 NODE_FORWARD_MS = 1600
+
+
 TURN_SPEED = 60
 TURN_MIN_MS = 1200
 TURN_TIMEOUT_MS = 4000
@@ -186,6 +191,7 @@ def main():
     using_time=False    #Are we actually using the time right now or not?
     is_started=False    # Have we started
     count=0
+    at_start=True
     
     
     # ADDED (2026-10-15): state for the fixed turns and the test route.
@@ -195,6 +201,8 @@ def main():
     in_branch=False       # test route: inside a right branch we turned into
     lost_since=None       # time at which all four sensors went black (None = line seen)
     holdoff_until=0       # ignore junctions until now reaches this
+    
+    
     robot=functions.Robot()
     print(robot.position)
     functions.reset_map()
@@ -208,9 +216,10 @@ def main():
     # ADDED (2026-10-15): use DRIVE_SPEED (top of this file) instead of the
     # Motor class default of 100 %. Robot.forward / left / right / backward /
     # about use these two values whenever no explicit speed is passed.
-    for m in (motor3, motor4):
-        m.forward_speed = DRIVE_SPEED
-        m.backward_speed = DRIVE_SPEED
+    motor3.forward_speed = DRIVE_SPEED
+    motor3.backward_speed = DRIVE_SPEED
+    motor4.forward_speed = DRIVE_SPEED
+    motor4.backward_speed = DRIVE_SPEED
 
     sensors=line_sensor.LineSensorArray([20,21,19,18],True)
 
@@ -236,6 +245,7 @@ def main():
             # crash sensor) stops both motors. The robot then waits for the next
             # press and starts again from a clean state (empty queue, mode "";
             # in test-route mode the route restarts with the start turn).
+            
             if button.pressed():
                 robot.stop(motor3, motor4)
                 
@@ -418,7 +428,7 @@ def main():
                         and not (LINE_TEST_ONLY and now < holdoff_until):
                     # A junction has been detected
                 
-                
+                    print("JUNCTION DETECTED")
                     robot.previous_position=robot.position
                     print(robot.position)
 
@@ -550,6 +560,7 @@ def main():
                     turning=True
                     robot.mode_extra_specific="move_straight"
                     
+                    
                     if robot.mode_specific[0]=="straight":
                         # MAYBE check if will trigger junction (need to implement)
                         robot.forward(motor3,motor4)
@@ -564,6 +575,7 @@ def main():
                         robot.forward(motor3,motor4, reverse=True)
                         reversing=True
                         time_count=now+int(NODE_FORWARD_MS/4)
+                    
 
                 elif robot.mode_extra_specific=="move_straight":
                     # Make sure does not change off line
@@ -572,6 +584,11 @@ def main():
                         reversing=False
                         left_old_line=False
                         turn_deadline=now+TURN_TIMEOUT_MS
+                        
+                        if at_start:#Exact turn especially for start
+                            TURN_MIN_MS=1750
+                        
+                        
                         if robot.mode_specific[0]=="straight":
                             # MAYBE check if will trigger junction (need to implement)
                             robot.forward(motor3,motor4,reverse=reversing)
@@ -588,6 +605,10 @@ def main():
                         elif robot.mode_specific[0]=="about":
                             robot.about(motor3,motor4)
                             time_count=now+TURN_MIN_MS*2
+                        
+                        if at_start:
+                            at_start=False
+                            TURN_MIN_MS=1200
 
                 elif robot.mode_extra_specific=="move_turning":
                     # If we need crash detection or anything here then do it

@@ -41,46 +41,46 @@ def test_motors():
     robot=functions.Robot()
     
     
-    print("Forward")
-    robot.forward(motor3, motor4)
-    # from control.start_stop import StartStopButton
-    # button = StartStopButton.from_config()
-    # is_pressed=True
-    # try:
-    #     while True:
-    #         if not is_pressed and button.pressed():
-    #             robot.forward(motor3, motor4)
-    #             is_pressed=True
-    #             sleep(1)
-    #         elif is_pressed and button.pressed():
+    # print("Forward")
+    # robot.forward(motor3, motor4)
+    # # from control.start_stop import StartStopButton
+    # # button = StartStopButton.from_config()
+    # # is_pressed=True
+    # # try:
+    # #     while True:
+    # #         if not is_pressed and button.pressed():
+    # #             robot.forward(motor3, motor4)
+    # #             is_pressed=True
+    # #             sleep(1)
+    # #         elif is_pressed and button.pressed():
                 
-    #             robot.forward(motor3, motor4, reverse=True)
-    #             is_pressed=False
-    #             sleep(1)
-    # finally:
+    # #             robot.forward(motor3, motor4, reverse=True)
+    # #             is_pressed=False
+    # #             sleep(1)
+    # # finally:
     
 
-    sleep(1)
-    print("Right")
-    robot.right(motor3, motor4)
-    sleep(1)
-    print("Left")
-    robot.left(motor3, motor4)
+    # sleep(1)
+    # print("Right")
+    # robot.right(motor3, motor4)
+    # sleep(1)
+    # print("Left")
+    # robot.left(motor3, motor4)
 
-    sleep(1)
-    print("Reverse")
-    robot.forward(motor3, motor4, reverse=True)
-    sleep(1)
-    robot.stop(motor3, motor4)
+    # sleep(1)
+    # print("Reverse")
+    # robot.forward(motor3, motor4, reverse=True)
+    # sleep(1)
+    # robot.stop(motor3, motor4)
     
     count=0
     while count<1:
         count+=1
         print("Forward")
-        motor3.Forward()
-        motor4.Forward()
+        motor3.Forward(60)
+        motor4.Forward(60)
 
-        sleep(1)
+        sleep(2)
         print("Reverse")
         motor3.Reverse()
         motor4.Reverse()
