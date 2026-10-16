@@ -68,9 +68,13 @@ def reset_map(old_phrases=["COLLECTED", "OCCUPIED"]):
 
 class Robot:
     def __init__(self):
-        self.position = "START"
+        self.position = "JUNCTION_LEFT_BOTTOM"
+        self.direction = "west"
+        
+
         self.previous_position = "START"
-        self.direction = "north"
+        # self.position = "START"
+        # self.direction = "north"
         self.objective = ""
         self.final_objective = ""
         self.mode = ""
@@ -223,6 +227,25 @@ class Robot:
                 self.motor_right=False
                 motor3.off()
                 motor4.off()
+    
+    def spin(self, motor3, motor4, direction, speed):
+        """ADDED (2026-10-15): turn on the spot, "left" or "right".
+
+        One wheel drives forwards and the other backwards at the same power, so
+        the robot rotates about the middle of its wheel axle and stays on the
+        junction. Robot.left / Robot.right are NOT used for junction turns: they
+        stop one wheel and pivot about it, which moves the robot sideways off
+        the junction while it turns, so it ends up beside the new line.
+        motor3 is the left wheel, motor4 the right wheel.
+        """
+        if direction == "left":
+            motor3.Reverse(speed)
+            motor4.Forward(speed)
+        else:
+            motor3.Forward(speed)
+            motor4.Reverse(speed)
+        self.motor_left = True
+        self.motor_right = True
 
     
     
@@ -256,7 +279,6 @@ class Robot:
                 while current is not None:
                     path.append(current)
                     current = previous[current]
-
                 return path
 
             # Explore all connected neighbours
@@ -285,6 +307,8 @@ class Robot:
             #   MAP[self.position].keys()[MAP[self.position].values().index(location)]
             # always raised an error. Instead, look through the four
             # directions for the one whose neighbour is `location`.
+            if self.position == location:
+                return []
             final_direction = None
             for direction in ("north", "east", "south", "west"):
                 if MAP[self.position].get(direction) == location:
