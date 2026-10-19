@@ -586,7 +586,7 @@ def main():
                         turn_deadline=now+TURN_TIMEOUT_MS
                         
                         if at_start:#Exact turn especially for start
-                            TURN_MIN_MS=1750
+                            TURN_MIN_MS=1700
                         
                         
                         if robot.mode_specific[0]=="straight":
