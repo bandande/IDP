@@ -127,7 +127,7 @@ MAG_ON_MV = 300                # analog: |field| at or above this -> magnet dete
 MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone (hysteresis)
 
 # ---------------------------------------------------------------------------
-# Task sensors (control/task_sensors.py, used by mission.py). Values marked
+# Task sensors (control/task_sensors.py, used by main.py). Values marked
 # TODO are placeholders until they are measured / the task rule is known.
 # ---------------------------------------------------------------------------
 # Magnet pole of the box at pick-up -> rack level.
@@ -143,10 +143,10 @@ SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from 
                                # put in from the other side of the rack - is closer than this; an
                                # empty slot reads further (or nothing). Measure both on the table.
 # Traffic light (IR receiver). Before driving along a line listed here (pairs
-# of node names from track_map.py), the robot stops and waits for green.
+# of node names from MAP.py), the robot stops and waits for green.
 # The light is at the ramp entrance: the robot waits at START before driving
-# north up the ramp. Not on the way back down the ramp.
-TRAFFIC_LIGHT_EDGES = (("START", "BOX_N"),)
+# north up the ramp (START -> TOP_CENTRE). Not on the way back down the ramp.
+TRAFFIC_LIGHT_EDGES = (("START", "TOP_CENTRE"),)
 TRAFFIC_RED_WHEN_IR = False    # IR beacon active means GREEN (go); no IR = red (wait)
 TRAFFIC_IR_CONFIRM_MS = 200    # IR = green: IR must be seen without a break this long (a single
                                # stray pulse only counts for IR_PRESENT_WINDOW_MS = 150 ms)
@@ -156,47 +156,6 @@ TRAFFIC_WAIT_MAX_MS = 0        # give up waiting and go after this long (0 = wai
 # Not used in the final schematic: GP12 (physical 16; the department examples
 # put a start button there), plus GP0-GP3 if motor driver 1 is not used.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
-
-# ---------------------------------------------------------------------------
-# Main program: the task (mission.py). TODO: replace with the real task rules.
-# ---------------------------------------------------------------------------
-# Pads to pick a box up from, in this order (one box each).
-PICKUP_ORDER = ("PAD_GREEN", "PAD_RED", "PAD_YELLOW", "PAD_BLUE")
-# Which rack a box goes to, by the pad it came from.
-DELIVERY_RACK = {"PAD_GREEN": "ORANGE", "PAD_RED": "ORANGE",
-                 "PAD_YELLOW": "PURPLE", "PAD_BLUE": "PURPLE"}
-# From which side of that rack the robot loads each level ("TOP" / "BOTTOM",
-# from the box's magnet, see MAG_POLE_LEVEL): "W" = from the west, "E" = from
-# the east. This is the rule of the old main.py (BOTTOM from the side lines,
-# TOP from the spine). The robot tries slot 1, 2, ... 6 and skips full ones.
-DELIVERY_SIDE = {("ORANGE", "BOTTOM"): "W", ("ORANGE", "TOP"): "E",
-                 ("PURPLE", "TOP"): "W", ("PURPLE", "BOTTOM"): "E"}
-PICKUP_TIME_MS = 1000          # TODO: replace the wait with the gripper (servo) code
-DROP_TIME_MS = 2000            # TODO: replace the wait with the gripper (servo) code
-
-# ---------------------------------------------------------------------------
-# Main program: driving (navigation.py). The speeds and times were tuned on
-# the real table by the team (2026-10-19, old main.py: DRIVE_SPEED,
-# TURN_SPEED, NODE_FORWARD_MS, TURN_MIN_MS) and mean the same here.
-# ---------------------------------------------------------------------------
-NAV_DRIVE_SPEED = 60           # % power when following a line
-NAV_STEER_SLOW_PERCENT = 30    # while correcting, the wheel on the inside of the bend runs at this %
-                               # of NAV_DRIVE_SPEED (0 = it stops; bigger = gentler corrections)
-NAV_TURN_SPEED = 60            # % power of both wheels when turning on the spot
-NAV_REVERSE_SPEED = 60         # % power when reversing out of a pad or a rack slot
-LINE_SENSOR_AHEAD_M = 0.20     # TODO measure: distance from the wheel axle to the line sensors (m)
-NAV_NODE_FORWARD_MS = 1600     # time to drive LINE_SENSOR_AHEAD_M at NAV_DRIVE_SPEED, i.e. from
-                               # "sensors on a junction" to "wheels on the junction"
-NAV_TURN_MIN_MS = 1200         # a 90 degree turn spins at least this long before it looks for the line
-NAV_TURN_MIN_MS_ABOUT = 2400   # the same for a 180 degree turn
-NAV_START_TURN_MIN_MS = 1700   # turns on START (the start box lines must be passed first)
-NAV_TURN_TIMEOUT_MS = 3000     # after the minimum: no line found for this long -> stop
-NAV_JUNCTION_HOLDOFF_MS = 300  # after leaving a node, ignore the outer sensors this long
-NAV_LINE_END_MS = 150          # all four sensors black this long = end of a rung (slot reached)
-NAV_LINE_LOST_MS = 600         # all black this long while looking for a junction = line lost -> stop
-NAV_LEG_TIMEOUT_MS = 20000     # one leg (node to node) taking longer than this -> stop
-NAV_REVERSE_TIMEOUT_MS = 6000  # reversing out of a pad / slot taking longer than this -> stop
-NAV_LOOP_MS = 2                # pause in every control loop
 
 # ---------------------------------------------------------------------------
 # Drive motors (schematic net labels; same pins as the team's motor.py).

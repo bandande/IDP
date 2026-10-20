@@ -16,12 +16,13 @@ copied into the wiring: see section 5, "Schematic error".**
 
 ## 1. Status (2026-10-20)
 
-Main program: rewritten on 2026-10-20 to be easy to read and change
-(`main.py`, `mission.py`, `navigation.py`, `track_map.py`, section 3). It
-passes all simulator checks (`python -m sim.check`, 6 of 6) but has **not
-run on the real table yet**: the speeds and times are the team's values
-from the real table, but the map distances and the task rules are still
-estimates (search config.py and track_map.py for TODO).
+Main program: the team's `main.py` / `functions.py` / `MAP.py` (queue of
+tasks, see section 3), with the fixes of 2026-10-20 (each marked FIX /
+ADDED / CHANGED in the code) and the task sensors (magnet pole, slot check,
+traffic light). It passes all simulator checks (`python -m sim.check`,
+6 of 6) up to the first box drop, but the fixes have **not run on the real
+table yet**; distances marked TODO in `main.py` and `config.py` still have
+to be measured.
 
 | Sensor | Count | Code | Tested on the robot |
 |---|---|---|---|
@@ -58,11 +59,11 @@ Software on the laptop
 
 | Path | Runs on | Contents |
 |---|---|---|
-| `main.py` | Pico | the main program: starts the hardware, waits for the start button, runs the task. The Pico runs it automatically at every boot. |
-| `mission.py` | Pico | the task, step by step: pick up, read the magnet, deliver to a free slot, go back to the start |
-| `navigation.py` | Pico | driving from node to node: line following, junctions, turns, reversing, traffic light |
-| `track_map.py` | Pico | the map of the table: nodes with positions, the lines between them, route finding |
-| `config.py` | Pico | every pin, speed, time and task rule; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
+| `main.py` | Pico | the main program (the team's): a queue of tasks (collect, deliver, go back) worked through by a mode state machine; turn / junction settings at the top. The Pico runs it automatically at every boot. |
+| `functions.py` | Pico | `Robot`: position, heading, the task queue, motor moves (`forward`, `spin`, ...), `find_route()`, `move_to()` |
+| `MAP.py` | Pico | the table as nodes with their north / east / south / west neighbours |
+| `motor.py`, `constants.py` | Pico | the team's `Motor` class (DIR + PWM) and constants |
+| `config.py` | Pico | every pin and sensor setting, including the task sensors; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
 | `sensors/` | Pico | one module per sensor: hardware interface + data processing |
 | `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `servo.py` (gripper servos), `leds.py` (yellow / red / green LEDs) |
 | `control/` | Pico | `task_sensors.py` (magnet pole, slot check, traffic light), `start_stop.py` (crash sensor as start / stop button), `line_follower.py` (backup line follower for the bench test) |
@@ -90,73 +91,62 @@ Sensor modules
 | `control/start_stop.py` | `StartStopButton.from_config()`, `.pressed()` (True once per press) |
 | `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()`, `.light_reset()`, `.light_update()` -> "red" / "green" |
 | `actuators/servo.py` | `Servo(pin)`, `.set_angle(deg)` (0-270), `.angle()` (last angle set), `.off()` |
-| `track_map.py` | `NODES`, `LINES`, `NEIGHBOURS`, `find_route(a, b)`, `direction(a, b)`, `turn_needed(heading, direction)`, `side_branches(node, heading)` |
-| `navigation.py` | `Navigator(drive, line, button, tasks)`, `.go_to(node)`, `.face_slot(slot)`, `.enter_slot(slot)`; raises `StopRequested` / `NavigationError` |
 
-### The main program
+### The main program (`main.py`)
 
-What happens after the start button (the left front crash sensor) is pressed:
+The robot works through a queue of tasks (`robot.queue`, used from the end):
+`collect` (plan the route to the next pad + `pick_up`), `deliver` (plan the
+route to the first free drop slot + `drop_off`) and `go_back` (route to START
++ `stop`). Node names are expanded by `robot.move_to()` into a turn and a
+"straight" drive; the modes (`straight`, `correction`, `turning`, ...) carry
+them out. Changes of 2026-10-20, all marked in the code:
 
-1. `mission.run()`: for every pad in `config.PICKUP_ORDER`, drive there
-   (`nav.go_to(pad)`), pick the box up and read its magnet (north / south ->
-   rack level TOP / BOTTOM, `config.MAG_POLE_LEVEL`).
-2. Work out the slots for the box (`config.DELIVERY_RACK` and
-   `config.DELIVERY_SIDE`), then for slot 1, 2, ...: turn at the slot's
-   junction to look down its rung (`nav.face_slot`), check it with the front
-   distance sensor, and if it is free drive up to the rack (`nav.enter_slot`)
-   and put the box down; if a box is already there, try the next slot.
-3. When every pad is done, drive back to START and park in the start box.
-
-A press of the button at any time stops the robot; a driving problem (line
-lost, no line found while turning, ...) stops it with a message. Put it back
-in the start box (line sensors on START, facing north) and press again.
-
-How the robot drives (details at the top of `navigation.py`):
-- Every place it can stop or turn is a **node** of `track_map.py` with a
-  position. Routes are found on this map; directions (north / east / south /
-  west) come from the positions, so the map cannot contain one-way links.
-- The **inner** line sensors keep it on the line; an **outer** sensor that
-  sees a side line means "junction reached" - only on the side where the map
-  says the next node has a line.
-- The line sensors are ~20 cm in front of the wheels. Before a turn the
-  robot drives on until the **wheels** are on the junction, then spins on
-  the spot until the inner sensors find the new line. A node closer than the
-  sensors after a turn (e.g. the second pad stub) is counted at once.
-- Pads: the robot only turns to face the pad at its junction (no driving in),
-  so it leaves by simply turning. Rack slots: it drives along the rung to the
-  rack and reverses back out until all four sensors see the line again.
-- Before driving up the ramp from START it waits for the traffic light (IR
-  beacon = green, `config.TRAFFIC_*`).
-
-Where to change things:
-
-| To change ... | edit |
-|---|---|
-| speeds, turn times, timeouts | `config.py`, "Main program: driving" (`NAV_*`) |
-| which pads, which rack / side, pick-up and drop times | `config.py`, "Main program: the task" |
-| pole -> level, slot "full" distance, traffic light | `config.py`, "Task sensors" |
-| the order of the steps of the task | `mission.py` |
-| the table (node positions, lines) | `track_map.py` (then run `python -m sim.check`) |
-| the gripper | `mission.py`: `pick_up()` and `put_down()` (TODO), with `actuators/servo.py` |
+- **Start / stop button** (left front crash sensor): read once per loop
+  (before, a press was often used up and lost, so the button sometimes did
+  not stop the robot). A SHORT press pauses and the next press continues
+  from the same place; a LONG press (`LONG_PRESS_MS`) stops and resets to
+  START.
+- **Task sensors** (`control/task_sensors.py`, settings in `config.py`):
+  - at `pick_up` the magnet pole decides the level (`drop_off_info[1]`,
+    TOP / BOTTOM drops);
+  - after turning into a drop slot, `check_slot` looks into it with the
+    front distance sensor; a full slot is marked `OCCUPIED` and the next one
+    is planned (all full -> reset, as before);
+  - before driving up the ramp (START -> TOP_CENTRE) the robot waits for the
+    traffic light (`wait_light`, IR beacon = green, no time limit).
+- **Nodes closer than the line sensors** (`CLOSE_AFTER_TURN`,
+  `close_after_turn()`): the sensors are ~20 cm in front of the wheels, so
+  after a turn on the spot a node only 8-17 cm away (start box edges, the
+  second pad junction, the next drop junction) is already behind them. It
+  is counted at once, and the next turn only drives the remaining distance.
+- **Junction hold-off** only after a junction is detected, not after a turn.
+- **`TURN_MIN_MS`** is no longer reassigned inside `main()` (local
+  `turn_min`, `START_TURN_MIN_MS` for the first turn).
+- **`MAP.py`**: wrong links fixed (east line, spine end, T-bars); the
+  START.west "map bodge" is replaced by `CLOSE_AFTER_TURN`.
+- `LINE_TEST_ONLY` and the line-test route were removed from `main.py`
+  (bench line tests: `tests/test_line_follow.py`).
 
 ### Simulator (`sim/`, runs on the PC)
 
 The simulator runs the robot code **unchanged** on a simulated table built
-from `track_map.py`: the robot's motion (rear-wheel drive, sensors 20 cm in
-front), line sensors, start button, magnets in the pads, boxes in rack slots
-(front distance sensor) and the IR traffic light. Needs `numpy` and
+from `sim/track_map.py` (the table with positions in metres; the robot
+itself uses `MAP.py`): the robot's motion (rear-wheel drive, sensors 20 cm
+in front), line sensors, start button, magnets in the pads, boxes in rack
+slots (front distance sensor) and the IR traffic light. Needs `numpy` and
 `matplotlib`.
 
 ```
 python -m sim.check                     # all regression checks, PASS / FAIL (~1 min)
 python -m sim.run --png run.png         # one run of main.py, with a picture of the path
-python -m sim.run --boxes ORANGE_E1 --poles GREEN=south --light 20,10
+python -m sim.run --boxes LEFT_BOTTOM_DROP_1 --poles GREEN_1=south --light 20,10
 python -m sim.arena --png table.png     # draw the table with the node names
 ```
 
 Run `python -m sim.check` before every push. The robot's size and speed in
-the simulator (`sim/world.py`, `RobotSpec`) and the table (`track_map.py`)
-are estimates: a PASS means the logic works, not that the real robot will.
+the simulator (`sim/world.py`, `RobotSpec`) and the table
+(`sim/track_map.py`) are estimates: a PASS means the logic works, not that
+the real robot will.
 
 Every module starts with a docstring that explains the device, its wiring, the
 data processing and a usage example.
@@ -568,18 +558,19 @@ turn, because spinning sweeps the sensors over other lines.
 
 ## 12. Known issues and to-do
 
-Main program (search for TODO in `config.py`, `track_map.py`, `mission.py`)
-1. Measure the table and put the positions into `track_map.py`, especially
-   the distance between the two pad stubs on each side line.
-2. Measure the robot: `LINE_SENSOR_AHEAD_M` (wheel axle -> line sensors) and
-   check `NAV_NODE_FORWARD_MS` / `NAV_TURN_MIN_MS` on the table.
-3. Task rules: `PICKUP_ORDER`, `DELIVERY_RACK`, `DELIVERY_SIDE` and
-   `MAG_POLE_LEVEL` are placeholders (the last two follow the old MAP.py:
-   BOTTOM from the side lines, TOP from the spine).
-4. Measure `MAG_NORTH_SIGN` (hold a known north pole to the sensor),
-   `FRONT_TOF` (which distance sensor faces forward) and `SLOT_OCCUPIED_MM`
-   (robot at a slot's junction facing an empty slot / a full slot).
-5. The gripper: `mission.pick_up()` and `mission.put_down()` only wait.
+Main program
+1. Measure on the table / robot and update `main.py`: `SENSOR_AHEAD_M`
+   (wheel axle -> line sensors), the distances in `CLOSE_AFTER_TURN`
+   (start box edges, pad junction spacing) and `RUNG_SPACING_M`.
+2. Measure `MAG_NORTH_SIGN`, `FRONT_TOF` (which distance sensor faces
+   forward) and `SLOT_OCCUPIED_MM` (robot turned into a slot, empty / full);
+   set `MAG_POLE_LEVEL` to the task rule (`config.py`, "Task sensors").
+3. Leaving a drop slot with an "about" turn: the wheels are then on the
+   junction, so the sensors start past it and the robot can drive on into
+   the opposite rung (seen in the simulator). To be handled by the custom
+   drop-off function.
+4. The gripper: `pick_up` / `drop_off` only wait.
+5. A turn that never finds a line keeps spinning (press the button).
 
 Hardware / schematic
 5. **Schematic error: Distance Sensor 1 SDA is drawn joined to VCC** (section

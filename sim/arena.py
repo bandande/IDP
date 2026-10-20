@@ -1,21 +1,22 @@
 """
 The competition table for the simulator.
 
-The white lines come straight from the ROBOT's map, track_map.py (the same
-nodes, positions and lines), so the simulator and the robot can never
-disagree about the table. This file only adds what the robot's map does not
-need: line width, the T-bars, the coloured pads, the racks, the ramp and the
-traffic light, for the sensors and the pictures.
+The white lines come from sim/track_map.py: the table as named nodes with
+positions (metres) and the straight lines between them. (The robot itself
+uses MAP.py, which only knows which node is next to which; the simulator
+needs real positions.) This file adds the line width, the T-bars, the
+coloured pads, the racks, the ramp and the traffic light, for the sensors
+and the pictures.
 
 Coordinates: metres, origin = south-west corner of the table, x = east,
-y = north (see track_map.py).
+y = north (see sim/track_map.py).
 """
 
 import math
 
 import numpy as np
 
-import track_map
+from sim import track_map
 
 LINE_W = 0.020            # white tape width
 TBAR = 0.12               # T-bar length at the north ends
@@ -39,7 +40,7 @@ for _k in range(1, 7):
 
 
 def sim_name(name):
-    """track_map.py node name for a node name, an old MAP.py name or a pad colour."""
+    """sim/track_map.py node name for a simulator name, a MAP.py name or a pad colour."""
     return TEAM_NAMES.get(name, name)
 
 

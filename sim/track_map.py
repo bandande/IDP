@@ -1,5 +1,8 @@
 """
-The map of the competition table: where the white lines go.
+The SIMULATOR's map of the competition table: where the white lines go,
+with positions in metres. The robot does not use this file - its map is
+MAP.py (node names and neighbours only). The OLD NAMES table below shows
+which MAP.py node is which node here.
 
 HOW THE MAP WORKS
   * Every place where the robot can stop, turn or do something is a NODE

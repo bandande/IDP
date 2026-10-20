@@ -3,129 +3,147 @@ Regression check: run this after every change to the robot code.
 
     python -m sim.check            (from the repository root, takes ~1 minute)
 
-It checks the map (track_map.py) and then runs the robot's real main
-program in the simulator in several situations, printing PASS / FAIL for
-each. The map and the robot's speeds are estimates, so a PASS here means
-"the logic works"; the real table still needs testing.
+It checks MAP.py and then runs the robot's real main.py in the simulator in
+several situations, printing PASS / FAIL for each. The simulated table and
+the robot's speeds are estimates, so a PASS means "the logic works"; the
+real table still needs testing.
 
-  map         every pad and rack slot can be reached from START and back;
-              no node has two lines going the same way
-  mission     the whole task: 4 boxes delivered, robot back at START,
-              nothing hit
-  full slots  boxes already in the first two slots for the first box: the
-              robot looks into them, skips them, uses the third. The second
-              box goes to the same rack from the other side: those three
-              slots are full now (a slot is open on both sides), so it uses
-              the fourth
-  red light   the light is red when the robot reaches the ramp: it waits,
-              then goes when it turns green
-  poles       a south pole in the green pad: that box goes to the BOTTOM
-              level (west line) instead of TOP (spine)
-  stop button pressed again while driving: the robot stops at once
+  map          every pad and drop slot in MAP.py can be reached from START;
+               no link is one-way (except the start box corners, which are
+               never driven along)
+  top level    north pole in GREEN_1 -> TOP level: the robot waits at the
+               traffic light, then drops the box at LEFT_TOP_DROP_1
+  bottom level south pole in GREEN_1 -> BOTTOM level: drop at
+               LEFT_BOTTOM_DROP_1
+  full slot    a box is already in LEFT_BOTTOM_DROP_1: the robot sees it,
+               skips it and drops at LEFT_BOTTOM_DROP_2
+  red light    the light is red when the robot reaches the ramp: it waits,
+               then goes when it turns green
+  pause/reset  a short press pauses (no wheel turns) and the next press
+               continues; a long press stops and resets
+
+Each run is checked up to the first box drop; driving out of a drop slot is
+being reworked (custom drop-off function), so the runs stop there.
 """
 
 import math
+import os
 import sys
 
 
 def _check_map():
-    import track_map
+    from sim.run import _setup_paths
+    _setup_paths()                  # functions.py imports motor.py, which needs (fake) machine
+    import functions
+    from MAP import MAP
     problems = []
-    for node in track_map.PADS + track_map.SLOTS:
-        for a, b in (("START", node), (node, "START")):
-            try:
-                track_map.find_route(a, b)
-            except ValueError as e:
-                problems.append(str(e))
-    for a, b in track_map.LINES:
-        if a not in track_map.NODES or b not in track_map.NODES:
-            problems.append("line %s - %s uses an unknown node" % (a, b))
+    opposite = {"north": "south", "south": "north", "east": "west", "west": "east"}
+    box_corners = ("TOP_LEFT", "TOP_RIGHT", "MIDDLE_LEFT", "MIDDLE_RIGHT")
+    for name, node in MAP.items():
+        for direction, other in node.items():
+            if direction not in opposite or other is None:
+                continue
+            if other not in MAP:
+                problems.append("%s.%s -> %s: no such node" % (name, direction, other))
+            elif MAP[other].get(opposite[direction]) != name and not (name in box_corners and other in box_corners):
+                problems.append("one-way link %s.%s -> %s" % (name, direction, other))
+    robot = functions.Robot()
+    for goal in MAP:
+        if goal.startswith(("GREEN_", "RED_")) or ("_DROP_" in goal and not goal.startswith("JUNCTION_")):
+            route = robot.find_route(goal)
+            if not route or route[0] != goal:
+                problems.append("no route from START to %s" % goal)
     return problems
 
 
 def _printed(notes, text):
-    return [line for t, x, y, line in notes if text in line]
+    return [(t, x, y, line) for t, x, y, line in notes if text in line]
+
+
+def _on_rung(x, y, slot):
+    """Is the rear axle (x, y) on the rung that leads to `slot` (a MAP.py drop
+    name, e.g. LEFT_BOTTOM_DROP_1)?"""
+    from sim import track_map
+    from sim.arena import sim_name
+    end = sim_name(slot)
+    junction = list(track_map.NEIGHBOURS[end].values())[0]
+    (jx, jy), (ex, ey) = track_map.NODES[junction], track_map.NODES[end]
+    if abs(jy - ey) < 1e-6:                   # an east-west rung
+        return abs(y - jy) < 0.06 and min(jx, ex) - 0.05 <= x <= max(jx, ex) + 0.05
+    return abs(x - jx) < 0.06 and min(jy, ey) - 0.05 <= y <= max(jy, ey) + 0.05
 
 
 def _scenario(name, check, **options):
-    import os
     from sim.run import run
     os.makedirs("sim_output", exist_ok=True)
-    png = os.path.join("sim_output", "check_%s.png" % name.replace(" ", "_"))
+    png = os.path.join("sim_output", "check_%s.png" % name.replace(" ", "_").replace("/", "_"))
     world, notes, reason = run(png=png, quiet=True, **options)
-    problems = check(world, notes, reason)
-    return problems
+    return check(world, notes, reason)
 
 
-def _mission_ok(world, notes, reason, boxes=4):
-    problems = []
-    done = _printed(notes, "mission complete")
-    if not done:
-        problems.append("mission did not complete (end: %s)" % reason.splitlines()[0])
-    elif "%d boxes delivered" % boxes not in done[0]:
-        problems.append(done[0])
-    if world.events and any(kind == "stop" and "hit" in text for t, kind, text in world.events):
-        problems.append("collision: %s" % world.stopped)
-    import track_map
-    sx, sy = track_map.NODES["START"]
-    if done and math.hypot(world.x - sx, world.y - sy) > 0.06:
-        problems.append("did not park on START: wheels at (%.2f, %.2f)" % (world.x, world.y))
-    return problems
+def _dropped_at(notes, slot):
+    drops = _printed(notes, "DROPPING STUFF")
+    if not drops:
+        return ["no box was dropped"]
+    t, x, y, line = drops[0]
+    if not _on_rung(x, y, slot):
+        return ["first box dropped at (%.2f, %.2f), not at %s" % (x, y, slot)]
+    return []
 
 
 def main():
-    results = []
+    results = [("map", _check_map())]
 
-    problems = _check_map()
-    results.append(("map", problems))
-
-    results.append(("mission", _scenario("mission", _mission_ok, seconds=400)))
-
-    def full_slots(world, notes, reason):
-        p = _mission_ok(world, notes, reason)
-        skipped = [line.split()[0] for line in _printed(notes, "already has a box")]
-        if skipped[:5] != ["ORANGE_E1", "ORANGE_E2", "ORANGE_W1", "ORANGE_W2", "ORANGE_W3"]:
-            p.append("unexpected full slots: %s" % skipped)
-        for slot in ("ORANGE_E3", "ORANGE_W4"):
-            if not _printed(notes, "putting the box down in %s" % slot):
-                p.append("no box was put into %s" % slot)
+    def top_level(world, notes, reason):
+        p = _dropped_at(notes, "LEFT_TOP_DROP_1")
+        if not _printed(notes, "waiting for the traffic light"):
+            p.append("did not stop at the traffic light")
         return p
-    results.append(("full slots", _scenario("full slots", full_slots, seconds=500,
-                                            boxes=["ORANGE_E1", "ORANGE_E2"])))
+    results.append(("top level", _scenario("top level", top_level, seconds=70)))
+
+    results.append(("bottom level", _scenario(
+        "bottom level", lambda w, n, r: _dropped_at(n, "LEFT_BOTTOM_DROP_1"),
+        seconds=70, poles={"GREEN_1": "south"})))
+
+    def full_slot(world, notes, reason):
+        p = _dropped_at(notes, "LEFT_BOTTOM_DROP_2")
+        if not _printed(notes, "LEFT_BOTTOM_DROP_1 already has a box"):
+            p.append("did not see the box in LEFT_BOTTOM_DROP_1")
+        return p
+    results.append(("full slot", _scenario("full slot", full_slot, seconds=90,
+                                           poles={"GREEN_1": "south"}, boxes=["LEFT_BOTTOM_DROP_1"])))
 
     def red_light(world, notes, reason):
-        p = _mission_ok(world, notes, reason)
-        waits = [line for line in _printed(notes, "traffic light green after")]
+        p = _dropped_at(notes, "LEFT_TOP_DROP_1")
+        waits = _printed(notes, "traffic light green - go")
         if not waits:
-            p.append("never waited at the traffic light")
-        elif int(waits[0].split("after")[1].split("ms")[0]) < 5000:
-            p.append("did not wait for the red light: %s" % waits[0].strip())
+            p.append("never went on from the traffic light")
+        elif int(waits[0][3].split("waited")[1].split("ms")[0]) < 5000:
+            p.append("did not wait for the red light: %s" % waits[0][3])
         return p
-    results.append(("red light", _scenario("red light", red_light, seconds=500, light=(40.0, 10.0, 0.0))))
+    results.append(("red light", _scenario("red light", red_light, seconds=90, light=(45.0, 10.0, 0.0))))
 
-    def poles(world, notes, reason):
-        p = _mission_ok(world, notes, reason)
-        if not _printed(notes, "putting the box down in ORANGE_W1"):
-            p.append("south-pole box from PAD_GREEN did not go to ORANGE_W1")
-        return p
-    results.append(("poles", _scenario("poles", poles, seconds=400, poles={"PAD_GREEN": "south"})))
-
-    def stop_button(world, notes, reason):
+    def pause_reset(world, notes, reason):
         p = []
-        if not _printed(notes, "stopped by the start/stop button"):
-            p.append("the second press did not stop the robot")
-        moved_after = [r for r in world.trace if r[0] > 10.5 and (abs(r[5]) > 0.01 or abs(r[6]) > 0.01)]
-        if moved_after:
-            p.append("wheels still turning %.1f s after the stop" % (moved_after[-1][0] - 10.0))
+        if not _printed(notes, "PAUSED"):
+            p.append("the short press did not pause")
+        if not _printed(notes, "continuing after"):
+            p.append("the next press did not continue")
+        if not _printed(notes, "STOP AND RESET"):
+            p.append("the long press did not stop and reset")
+        moving = [r for r in world.trace if 10.6 < r[0] < 14.0 and (abs(r[5]) > 0.01 or abs(r[6]) > 0.01)]
+        if moving:
+            p.append("wheels turning during the pause (t = %.1f s)" % moving[0][0])
         return p
-    results.append(("stop button", _scenario("stop button", stop_button, seconds=15, presses=(0.3, 10.0))))
+    results.append(("pause/reset", _scenario("pause reset", pause_reset, seconds=30,
+                                             presses=(0.3, 10.0, 14.0, 20.0), press_hold={20.0: 2000})))
 
     print()
     failed = 0
     for name, problems in results:
-        print("%-12s %s" % (name, "PASS" if not problems else "FAIL"))
+        print("%-13s %s" % (name, "PASS" if not problems else "FAIL"))
         for problem in problems:
-            print("             - %s" % problem)
+            print("              - %s" % problem)
         failed += bool(problems)
     print("\n%d of %d checks passed (pictures: sim_output/check_*.png)" % (len(results) - failed, len(results)))
     return failed

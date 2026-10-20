@@ -10,7 +10,7 @@ Run the robot code on the PC against the simulated table.
 The robot code runs UNCHANGED: sim/fakes is put first on sys.path, so its
 `import machine` / `import utime` get the simulator's versions, which talk
 to the simulated world (sim/world.py). Pins come from config.py, the table
-from track_map.py. The start/stop button is pressed automatically at
+from sim/track_map.py. The start/stop button is pressed automatically at
 --press seconds (default 0.3 s; several allowed; --press none = never).
 
 The task-sensor world:
@@ -22,7 +22,7 @@ The task-sensor world:
             for the first 8 s, then green for 8 s, ...). It sends IR while
             green, as on the real table. --light none = no light at all
             (no IR ever, so the robot waits at the ramp forever).
-  Names may be track_map.py names, pad colours (GREEN, ...) or the old
+  Names may be sim/track_map.py names, pad colours (GREEN, ...) or the
   MAP.py names (LEFT_BOTTOM_DROP_1, GREEN_1, ...).
 
 Output: the robot's printed lines (prefixed with the simulated time), a
@@ -34,7 +34,9 @@ import io
 import json
 import math
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +86,17 @@ def _setup_paths():
         raise RuntimeError("could not load the simulator's fake machine/utime")
 
 
+def _forget_robot_modules():
+    """Remove the robot's modules from sys.modules, so every run starts from
+    freshly imported code (the robot code keeps state in its modules, e.g.
+    the MAP dict that main.py marks COLLECTED / FILLED)."""
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None) or ""
+        path = os.path.abspath(path) if path else ""
+        if path.startswith(ROOT) and not path.startswith(HERE):
+            del sys.modules[name]
+
+
 def _parse_spec(items):
     out = {}
     for item in items or ():
@@ -119,11 +132,14 @@ def make_world(track, spec, pose, t_end, stop_on_collision=True):
 
 def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="north", back=0.20,
         pose=None, spec_overrides=None, kwargs=None, png="sim_run.png", quiet=False,
-        stop_on_collision=True, pad_fill_white=True, boxes=(), poles=None, light=(8.0, 8.0, 0.0)):
+        stop_on_collision=True, pad_fill_white=True, boxes=(), poles=None, light=(8.0, 8.0, 0.0),
+        press_hold=None):
     """Run one simulation. Returns (world, notes, end_reason).
 
-    notes: [(t, x, y, printed line)]; end_reason: why the run ended."""
+    notes: [(t, x, y, printed line)]; end_reason: why the run ended.
+    press_hold: {press time: hold ms} for presses longer than the default 80 ms."""
     _setup_paths()
+    _forget_robot_modules()
     from sim.fakes import _bus
     from sim.arena import build_arena, sim_name
     from sim.devices import SimToF
@@ -155,21 +171,17 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
 
     button_pin = config.CRASH_LEFT_PIN if config.START_STOP_SENSOR == "left" else config.CRASH_RIGHT_PIN
     for t in presses:
-        world.press(button_pin, t)
-
-    # Boxes the robot puts down appear in the simulated racks, so the front
-    # distance sensor sees them later (also from the other side of the rack).
-    import mission
-    real_put_down = mission.put_down
-
-    def put_down_and_record(slot):
-        real_put_down(slot)
-        world.add_box(slot)
-    mission.put_down = put_down_and_record
+        world.press(button_pin, t, hold_ms=(press_hold or {}).get(t, 80))
 
     module_name, func_name = entry.split(":") if ":" in entry else (entry, "main")
-    old_stdout = sys.stdout
+    # main.py's functions.reset_map() rewrites MAP.py in the CURRENT folder:
+    # run in a temporary folder with a copy, so the repository is not touched.
+    workdir = tempfile.mkdtemp(prefix="idp_sim_")
+    if os.path.exists(os.path.join(ROOT, "MAP.py")):
+        shutil.copy(os.path.join(ROOT, "MAP.py"), workdir)
+    old_cwd, old_stdout = os.getcwd(), sys.stdout
     out = _TimedOutput(world, old_stdout, quiet)
+    os.chdir(workdir)
     sys.stdout = out
     try:
         module = __import__(module_name, fromlist=[func_name])
@@ -181,7 +193,8 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
         reason = "robot code crashed:\n" + traceback.format_exc()
     finally:
         sys.stdout = old_stdout
-        mission.put_down = real_put_down
+        os.chdir(old_cwd)
+        shutil.rmtree(workdir, ignore_errors=True)
         _bus.world = None
     if world.stopped is None:
         world.stopped = reason.splitlines()[0]
