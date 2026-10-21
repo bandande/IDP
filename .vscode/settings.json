@@ -6,6 +6,12 @@
     },
     "python.terminal.activateEnvironment": false,
     "micropico.openOnStart": true,
+    "micropico.pyIgnore": [
+        "tools",
+        "sim",
+        "sim_output",
+        "README.md"
+    ],
     "python.analysis.typeshedPaths": [
         "~/.micropico-stubs/included"
     ],

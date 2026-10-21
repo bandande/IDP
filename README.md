@@ -1,10 +1,11 @@
-# IDP - Sensor Bench Guide
+# IDP - Robot Code and Bench Guide
 
 Cambridge Part IB Integrated Design Project. A line-following robot on a
-Raspberry Pi Pico 2 (RP2350) running MicroPython. This README is the guide
-for the sensor bench session: what is in the repository, how every sensor is
-wired, how to get the code onto the Pico, and a step-by-step test plan with
-pass criteria, calibration sheet and troubleshooting.
+Raspberry Pi Pico 2 (RP2350) running MicroPython. This README explains what
+is in the repository and how the main program works (section 3), how every
+sensor is wired, how to get the code onto the Pico, a step-by-step bench
+test plan with pass criteria, calibration sheet and troubleshooting, and the
+PC simulator for testing the program without the robot.
 
 All pins follow the **final team schematic** `SCH_Schematic1_2026-10-15.pdf`
 (EasyEDA, page "sensor_schematic_1"). `config.py` is the single place where
@@ -13,7 +14,15 @@ copied into the wiring: see section 5, "Schematic error".**
 
 ---
 
-## 1. Status (2026-10-15)
+## 1. Status (2026-10-20)
+
+Main program: the team's `main.py` / `functions.py` / `MAP.py` (queue of
+tasks, see section 3), with the fixes of 2026-10-20 (each marked FIX /
+ADDED / CHANGED in the code) and the task sensors (magnet pole, slot check,
+traffic light). It passes all simulator checks (`python -m sim.check`,
+6 of 6) up to the first box drop, but the fixes have **not run on the real
+table yet**; distances marked TODO in `main.py` and `config.py` still have
+to be measured.
 
 | Sensor | Count | Code | Tested on the robot |
 |---|---|---|---|
@@ -50,12 +59,15 @@ Software on the laptop
 
 | Path | Runs on | Contents |
 |---|---|---|
-| `main.py` | Pico | main loop (work in progress, see section 12). The Pico runs it automatically at every boot. |
-| `functions.py`, `MAP.py`, `constants.py` | Pico | navigation: `Robot` state, route finding on the course map, turn helpers |
-| `config.py` | Pico | every sensor pin and tuning constant; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
+| `main.py` | Pico | the main program (the team's): a queue of tasks (collect, deliver, go back) worked through by a mode state machine; turn / junction settings at the top. The Pico runs it automatically at every boot. |
+| `functions.py` | Pico | `Robot`: position, heading, the task queue, motor moves (`forward`, `spin`, ...), `find_route()`, `move_to()` |
+| `MAP.py` | Pico | the table as nodes with their north / east / south / west neighbours |
+| `motor.py`, `constants.py` | Pico | the team's `Motor` class (DIR + PWM) and constants |
+| `config.py` | Pico | every pin and sensor setting, including the task sensors; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
 | `sensors/` | Pico | one module per sensor: hardware interface + data processing |
-| `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `leds.py` (yellow / red / green LEDs) |
-| `control/` | Pico | `line_follower.py` (backup line follower, pure logic), `start_stop.py` (crash sensor as start / stop button) |
+| `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `servo.py` (gripper servos), `leds.py` (yellow / red / green LEDs) |
+| `control/` | Pico | `task_sensors.py` (magnet pole, slot check, traffic light), `start_stop.py` (crash sensor as start / stop button), `line_follower.py` (backup line follower for the bench test) |
+| `sim/` | PC | the simulator: runs the robot code unchanged on a simulated table (see "Simulator" below). Do not upload. |
 | `libs/VL53L0X.py` | Pico | VL53L0X driver from the department template (unchanged) |
 | `tests/test_*.py` | Pico | on-robot test scripts, one per sensor, numbered in the recommended order |
 | `tests/stream_sensors.py` | Pico | streams every reading to the PC as JSON lines for the viewer |
@@ -67,7 +79,7 @@ Sensor modules
 | Module | Main API |
 |---|---|
 | `sensors/line_sensor.py` | `LineSensorArray.from_config()`, `.read()` -> 4-bit mask (bit set = white), `.read_raw()` |
-| `sensors/line_processing.py` | `LineTracker` (steering error -1..+1, ON_LINE / SEARCHING / LOST), `JunctionDetector` (ENTER / EXIT events with shape FOUR_JUNCTION / T_JUNCTION / CORNER, the names used in `MAP.py`), `bits_to_str()` |
+| `sensors/line_processing.py` | bit masks `OUTER_LEFT` ... `OUTER_RIGHT`; `LineTracker` (steering error -1..+1, ON_LINE / SEARCHING / LOST), `JunctionDetector` (ENTER / EXIT events with shape FOUR_JUNCTION / T_JUNCTION / CORNER; used by the backup follower), `bits_to_str()` |
 | `sensors/tof.py` | `tof_from_config()` -> `{"dist1": ToFSensor, "dist2": ToFSensor}`; `.poll()`, `.distance_mm` (None = no target / stale / unavailable), `.raw_mm`, `.range_status`, `.is_closer_than(mm)`, `.begin()` |
 | `sensors/crash.py` | `BumperPair.from_config()`, `.update()`, `.which()` -> None / "LEFT" / "RIGHT" / "BOTH", `.consume_hits()` |
 | `sensors/ir_receiver.py` | `IRReceiver.from_config()`, `.process()`, `.signal_present()`, `.get_frame()`; `decode_nec(frame)`, `match_template(frame, template)`, `frame_signature(frame)` |
@@ -77,6 +89,64 @@ Sensor modules
 | `actuators/leds.py` | `StatusLeds.from_config()`, `.set("green", True)`, `.show(red=True)`, `.off()` |
 | `control/line_follower.py` | `LineFollower.from_config()`, `.start(plan=None)`, `.update(bits)` -> (left, right), `.stop()`, `.state`, `.reason` |
 | `control/start_stop.py` | `StartStopButton.from_config()`, `.pressed()` (True once per press) |
+| `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()`, `.light_reset()`, `.light_update()` -> "red" / "green" |
+| `actuators/servo.py` | `Servo(pin)`, `.set_angle(deg)` (0-270), `.angle()` (last angle set), `.off()` |
+
+### The main program (`main.py`)
+
+The robot works through a queue of tasks (`robot.queue`, used from the end):
+`collect` (plan the route to the next pad + `pick_up`), `deliver` (plan the
+route to the first free drop slot + `drop_off`) and `go_back` (route to START
++ `stop`). Node names are expanded by `robot.move_to()` into a turn and a
+"straight" drive; the modes (`straight`, `correction`, `turning`, ...) carry
+them out. Changes of 2026-10-20, all marked in the code:
+
+- **Start / stop button** (left front crash sensor): read once per loop
+  (before, a press was often used up and lost, so the button sometimes did
+  not stop the robot). A SHORT press pauses and the next press continues
+  from the same place; a LONG press (`LONG_PRESS_MS`) stops and resets to
+  START.
+- **Task sensors** (`control/task_sensors.py`, settings in `config.py`):
+  - at `pick_up` the magnet pole decides the level (`drop_off_info[1]`,
+    TOP / BOTTOM drops);
+  - after turning into a drop slot, `check_slot` looks into it with the
+    front distance sensor; a full slot is marked `OCCUPIED` and the next one
+    is planned (all full -> reset, as before);
+  - before driving up the ramp (START -> TOP_CENTRE) the robot waits for the
+    traffic light (`wait_light`, IR beacon = green, no time limit).
+- **Nodes closer than the line sensors** (`CLOSE_AFTER_TURN`,
+  `close_after_turn()`): the sensors are ~20 cm in front of the wheels, so
+  after a turn on the spot a node only 8-17 cm away (start box edges, the
+  second pad junction, the next drop junction) is already behind them. It
+  is counted at once, and the next turn only drives the remaining distance.
+- **Junction hold-off** only after a junction is detected, not after a turn.
+- **`TURN_MIN_MS`** is no longer reassigned inside `main()` (local
+  `turn_min`, `START_TURN_MIN_MS` for the first turn).
+- **`MAP.py`**: wrong links fixed (east line, spine end, T-bars); the
+  START.west "map bodge" is replaced by `CLOSE_AFTER_TURN`.
+- `LINE_TEST_ONLY` and the line-test route were removed from `main.py`
+  (bench line tests: `tests/test_line_follow.py`).
+
+### Simulator (`sim/`, runs on the PC)
+
+The simulator runs the robot code **unchanged** on a simulated table built
+from `sim/track_map.py` (the table with positions in metres; the robot
+itself uses `MAP.py`): the robot's motion (rear-wheel drive, sensors 20 cm
+in front), line sensors, start button, magnets in the pads, boxes in rack
+slots (front distance sensor) and the IR traffic light. Needs `numpy` and
+`matplotlib`.
+
+```
+python -m sim.check                     # all regression checks, PASS / FAIL (~1 min)
+python -m sim.run --png run.png         # one run of main.py, with a picture of the path
+python -m sim.run --boxes LEFT_BOTTOM_DROP_1 --poles GREEN_1=south --light 20,10
+python -m sim.arena --png table.png     # draw the table with the node names
+```
+
+Run `python -m sim.check` before every push. The robot's size and speed in
+the simulator (`sim/world.py`, `RobotSpec`) and the table
+(`sim/track_map.py`) are estimates: a PASS means the logic works, not that
+the real robot will.
 
 Every module starts with a docstring that explains the device, its wiring, the
 data processing and a usage example.
@@ -129,7 +199,7 @@ data processing and a usage example.
 ```
 
 - Motors and servos are the schematic's net labels DIR1 / PWM1 / DIR2 /
-  PWM2 / ServoPin1 / ServoPin2 (they match the team's `motor.py`).
+  PWM2 / ServoPin1 / ServoPin2 (the same pins as the department examples).
 - The three indicator LEDs are switched through a 4-channel optocoupler:
   GPIO HIGH -> LED on (`config.LED_PINS`).
 - Only GP12 (physical 16) is still free, plus GP0-GP3 if motor driver 1 is
@@ -203,10 +273,10 @@ Important
 - **Only one program can use the serial port at a time.** Disconnect
   MicroPico (status bar) before starting the live viewer, and close the
   viewer before using MicroPico again.
-- The Pico runs `main.py` at every boot and after every soft reset. While
-  `main.py` is unfinished it stops with an error (section 12), which is
-  harmless: the REPL is then free for the tests. Once `main.py` contains a
-  real loop, press Ctrl-C to stop it before running a test.
+- The Pico runs `main.py` at every boot and after every soft reset. It does
+  not move until the start button is pressed, but it keeps the Pico busy:
+  press Ctrl-C to stop it before running a test (the motors are switched
+  off when it stops).
 
 ---
 
@@ -488,20 +558,19 @@ turn, because spinning sweeps the sensors over other lines.
 
 ## 12. Known issues and to-do
 
-Navigation code (`main.py`, `functions.py`). Checked against a real
-MicroPython 1.29 interpreter:
-1. `main.py` uses `match ... case` (line 25). **MicroPython does not support
-   `match`**; the file fails with `SyntaxError`. Rewrite with `if / elif`.
-2. `functions.py` uses `deque([self.position])`. MicroPython's deque needs a
-   maximum length: `deque((), 100)` and then `.append(self.position)`.
-   Because the last two lines of `functions.py` run a route search at import
-   time, `import functions` currently fails on the Pico. Move that test code
-   under `if __name__ == "__main__":`.
-3. `Robot.move_to()` uses `MAP[...].keys()[...]`. Dict views are not
-   indexable in CPython either; use
-   `for direction, place in MAP[self.position].items(): if place == location: ...`.
-4. `reset_map()` rewrites `MAP.py` on the Pico's flash on every run. Consider
-   keeping the visited / collected state in memory instead.
+Main program
+1. Measure on the table / robot and update `main.py`: `SENSOR_AHEAD_M`
+   (wheel axle -> line sensors), the distances in `CLOSE_AFTER_TURN`
+   (start box edges, pad junction spacing) and `RUNG_SPACING_M`.
+2. Measure `MAG_NORTH_SIGN`, `FRONT_TOF` (which distance sensor faces
+   forward) and `SLOT_OCCUPIED_MM` (robot turned into a slot, empty / full);
+   set `MAG_POLE_LEVEL` to the task rule (`config.py`, "Task sensors").
+3. Leaving a drop slot with an "about" turn: the wheels are then on the
+   junction, so the sensors start past it and the robot can drive on into
+   the opposite rung (seen in the simulator). To be handled by the custom
+   drop-off function.
+4. The gripper: `pick_up` / `drop_off` only wait.
+5. A turn that never finds a line keeps spinning (press the button).
 
 Hardware / schematic
 5. **Schematic error: Distance Sensor 1 SDA is drawn joined to VCC** (section
@@ -521,7 +590,8 @@ Hardware / schematic
   `typing`, `collections.deque` without a maxlen, `str.ljust/rjust/zfill`,
   numeric literal underscores, indexing dict views.
 - Time: use `utime.ticks_ms()` and always compare with `ticks_diff()`.
-- Check that a file compiles for MicroPython before uploading:
+- Before pushing: `python -m sim.check` (all PASS) and check that changed
+  files compile for MicroPython:
 
   ```
   pip install mpy-cross

@@ -1,7 +1,7 @@
 MAP = {
     # DEAD_END is converted to FILLED for filled spaces 
-    # and COLLECTED for collected boxes. Once all boxes are 
-    # collected, COLLECTED will be replaced by DEAD_END again
+    # and DEAD_END for collected boxes. Once all boxes are 
+    # collected, DEAD_END will be replaced by DEAD_END again
     
     # ==================================================
     # CENTRAL NETWORK
@@ -12,7 +12,7 @@ MAP = {
         "north": "TOP_CENTRE",
         "south": None,
         "east": "MIDDLE_RIGHT",
-        "west": "JUNCTION_LEFT_BOTTOM",
+        "west": "MIDDLE_LEFT",   # FIX (2026-10-20): was "JUNCTION_LEFT_BOTTOM" (map bodge); the box edge after a turn at START is now skipped in main.py
     },
 
     "TOP_CENTRE": {
@@ -149,7 +149,7 @@ MAP = {
 
     "JUNCTION_RED_2": {
         "type": "T_JUNCTION",
-        "north": "RIGHT_BOTTOM_DROP_1",
+        "north": "JUNCTION_RIGHT_BOTTOM_DROP_1",   # FIX (2026-10-20): was "RIGHT_BOTTOM_DROP_1" - north of the second red junction is the first drop JUNCTION on the east line, not the drop itself
         "south": "JUNCTION_RED_1",
         "east": None,
         "west": "RED_2",
@@ -310,7 +310,7 @@ MAP = {
     "JUNCTION_RIGHT_BOTTOM_DROP_1": {
         "type": "T_JUNCTION",
         "north": "JUNCTION_RIGHT_BOTTOM_DROP_2",
-        "south": "JUNCTION_GREEN_2",
+        "south": "JUNCTION_RED_2",   # FIX (2026-10-20): was "JUNCTION_GREEN_2" - south of it is JUNCTION_RED_2 on the same (east) line; JUNCTION_GREEN_2 is on the west line
         "east": None,
         "west": "RIGHT_BOTTOM_DROP_1",
     },
@@ -408,8 +408,8 @@ MAP = {
         "type": "T_JUNCTION",
         "north": None,
         "south": "JUNCTION_RIGHT_BOTTOM_DROP_6",
-        "east": "JUNCTION_STOP_RIGHT_LEFT",
-        "west": "JUNCTION_STOP_RIGHT_RIGHT",
+        "east": "JUNCTION_STOP_RIGHT_RIGHT",   # FIX (2026-10-20): was "JUNCTION_STOP_RIGHT_LEFT" - east and west were swapped (the _LEFT tip is to the west)
+        "west": "JUNCTION_STOP_RIGHT_LEFT",   # FIX (2026-10-20): was "JUNCTION_STOP_RIGHT_RIGHT" - east and west were swapped (the _LEFT tip is to the west)
     },
     
     "JUNCTION_STOP_RIGHT_LEFT": {
@@ -555,7 +555,7 @@ MAP = {
     
     "JUNCTION_TOP_DROP_6": {
         "type": "FOUR_JUNCTION",
-        "north": "JUNCTION_STOP_RIGHT_CENTRE",
+        "north": "JUNCTION_STOP_TOP_CENTRE",   # FIX (2026-10-20): was "JUNCTION_STOP_RIGHT_CENTRE" - the spine ends in its own T-bar, not the east line's
         "south": "JUNCTION_TOP_DROP_5",
         "east": "RIGHT_TOP_DROP_6",
         "west": "LEFT_TOP_DROP_6",
@@ -583,15 +583,15 @@ MAP = {
         "type": "T_JUNCTION",
         "north": None,
         "south": "JUNCTION_TOP_DROP_6",
-        "east": "JUNCTION_STOP_TOP_LEFT",
-        "west": "JUNCTION_STOP_TOP_RIGHT",
+        "east": "JUNCTION_STOP_TOP_RIGHT",   # FIX (2026-10-20): was "JUNCTION_STOP_TOP_LEFT" - east and west were swapped (the _LEFT tip is to the west)
+        "west": "JUNCTION_STOP_TOP_LEFT",   # FIX (2026-10-20): was "JUNCTION_STOP_TOP_RIGHT" - east and west were swapped (the _LEFT tip is to the west)
     },
     
     "JUNCTION_STOP_TOP_LEFT": {
         "type": "DEAD_END",
         "north": None,
         "south": None,
-        "east": "JUNCTION_STOP_RIGHT_CENTRE",
+        "east": "JUNCTION_STOP_TOP_CENTRE",   # FIX (2026-10-20): was "JUNCTION_STOP_RIGHT_CENTRE" - this T-bar tip belongs to the spine's T-bar
         "west": None,
     },
     

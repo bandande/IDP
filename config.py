@@ -126,6 +126,33 @@ MAG_DEBOUNCE_MS = 10           # digital modules only
 MAG_ON_MV = 300                # analog: |field| at or above this -> magnet detected
 MAG_OFF_MV = 200               # analog: |field| at or below this -> magnet gone (hysteresis)
 
+# ---------------------------------------------------------------------------
+# Task sensors (control/task_sensors.py, used by main.py). Values marked
+# TODO are placeholders until they are measured / the task rule is known.
+# ---------------------------------------------------------------------------
+# Magnet pole of the box at pick-up -> rack level.
+MAG_READ_MS = 400              # watch the magnet sensor this long at a pick-up
+MAG_NORTH_SIGN = 1             # TODO measure: sign of the field (+1 / -1) when a NORTH pole faces the sensor
+MAG_POLE_LEVEL = {"north": "TOP", "south": "BOTTOM"}   # TODO: the task rule (pole -> rack level)
+MAG_NO_POLE_LEVEL = "BOTTOM"   # level used when no magnet is found
+# Front distance sensor: is the drop slot already full? (the other ToF is not used)
+FRONT_TOF = "dist1"            # TODO check: which of TOF_SENSORS faces forward
+SLOT_READ_MS = 250             # collect readings this long in front of a slot
+SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from its junction (turned
+                               # to face it, before driving in). A box anywhere in the slot - also one
+                               # put in from the other side of the rack - is closer than this; an
+                               # empty slot reads further (or nothing). Measure both on the table.
+# Traffic light (IR receiver). Before driving along a line listed here (pairs
+# of node names from MAP.py), the robot stops and waits for green.
+# The light is at the ramp entrance: the robot waits at START before driving
+# north up the ramp (START -> TOP_CENTRE). Not on the way back down the ramp.
+TRAFFIC_LIGHT_EDGES = (("START", "TOP_CENTRE"),)
+TRAFFIC_RED_WHEN_IR = False    # IR beacon active means GREEN (go); no IR = red (wait)
+TRAFFIC_IR_CONFIRM_MS = 200    # IR = green: IR must be seen without a break this long (a single
+                               # stray pulse only counts for IR_PRESENT_WINDOW_MS = 150 ms)
+TRAFFIC_GREEN_AFTER_MS = 1500  # IR = red only: no IR for this long = green (longer than the beacon's off phase)
+TRAFFIC_WAIT_MAX_MS = 0        # give up waiting and go after this long (0 = wait forever)
+
 # Not used in the final schematic: GP12 (physical 16; the department examples
 # put a start button there), plus GP0-GP3 if motor driver 1 is not used.
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
@@ -144,6 +171,9 @@ MOTOR_LEFT_INVERT = False
 MOTOR_RIGHT_INVERT = False
 MOTOR_PWM_FREQ_HZ = 1000
 MOTOR_MIN_DUTY = 0             # % where the wheels just start to turn (tests/test_motors.py ramp)
+
+# Gripper servos (actuators/servo.py; schematic ServoPin1 / ServoPin2).
+SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physical 17
 
 # ---------------------------------------------------------------------------
 # Backup line follower (control/line_follower.py). Speeds are % of full PWM.
@@ -262,6 +292,16 @@ def validate():
             for t in members:
                 if t["xshut"] is None:
                     problems.append("ToF %s shares a bus but has no XSHUT pin" % t["name"])
+    # task sensors
+    if FRONT_TOF not in [t["name"] for t in TOF_SENSORS]:
+        problems.append("FRONT_TOF %r is not one of TOF_SENSORS" % (FRONT_TOF,))
+    if MAG_NORTH_SIGN not in (1, -1):
+        problems.append("MAG_NORTH_SIGN must be 1 or -1")
+    for pole in ("north", "south"):
+        if MAG_POLE_LEVEL.get(pole) not in ("TOP", "BOTTOM"):
+            problems.append("MAG_POLE_LEVEL[%r] must be 'TOP' or 'BOTTOM'" % pole)
+    if MAG_NO_POLE_LEVEL not in ("TOP", "BOTTOM"):
+        problems.append("MAG_NO_POLE_LEVEL must be 'TOP' or 'BOTTOM'")
     return problems
 
 
