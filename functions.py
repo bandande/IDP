@@ -105,6 +105,8 @@ class Robot:
         self.motor_right=False
         
         self.drop_off_info=[0,0,0]
+        
+        self.start=0
     
     def __init__(self):
         self.reset()
@@ -283,7 +285,7 @@ class Robot:
                 while current is not None:
                     path.append(current)
                     current = previous[current]
-                return path
+                return path[:-1]
 
             # Explore all connected neighbours
             for direction in ("north", "south", "east", "west"):
