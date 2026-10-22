@@ -429,13 +429,13 @@ def main():
                             
                     elif next_item == "go_back":
                         robot.final_objective="START"
+                        robot.queue.append("TOP_CENTRE")
                         robot.queue.append("stop")
                         robot.find_route(robot.final_objective)
                         robot.queue+=robot.find_route(robot.final_objective)
                         robot.mode=""
                         
                     elif next_item == "straight":
-
                         robot.forward(motor3,motor4)
                     elif next_item == "reverse_straight":
                         print(robot.mode)
