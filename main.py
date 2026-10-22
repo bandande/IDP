@@ -11,6 +11,7 @@ import sensors.line_sensor as line_sensor
 import machine
 import config
 import re
+from numpy import mean
 from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
 from control.start_stop import StartStopButton
 # ADDED (2026-10-20): the three task sensors (control/task_sensors.py):
@@ -59,53 +60,25 @@ DRIVE_SPEED = 60
 
 NODE_FORWARD_MS = 1600
 TURN_MIN_MS = 1200
+START_TURN_MIN_MS = 1700
+TURN_SPEED = 60
+
+
+# NODE_FORWARD_MS = 800
+# TURN_MIN_MS = 650
+# TURN_SPEED = 100
+
 TURN_TIMEOUT_MS = 4000
 LINE_LOST_MS = 150
 REVERSE_TIMEOUT_MS = 5000
 JUNCTION_HOLDOFF_MS = 400
 LONG_PRESS_MS = 1500
 
-# ADDED (2026-10-20): neighbouring nodes that are CLOSER to each other than
-# the line sensors are in front of the wheels (SENSOR_AHEAD_M). After the
-# robot TURNS on the spot at the first node, its sensors are already past the
-# second one and never see it, so the next junction would be counted as the
-# second node and every junction after it would be one off. For these pairs
-# the second node is counted as reached straight after the turn (see
-# "already behind the line sensors" in main()). Driving STRAIGHT through the
-# first node is not affected: then the sensors do see the second node.
-# The number is the distance between the two nodes (metres): the wheels are
-# then that far short of the second node, so if the robot turns there, it
-# first drives only that far (NODE_FORWARD_MS * distance / SENSOR_AHEAD_M)
-# instead of the full NODE_FORWARD_MS.
-#   - START and the start box edges: ~8-15 cm
-#   - the two pad junctions on each side line: ~17 cm in the video
-#   - neighbouring drop junctions on the same line (one rack slot apart):
-#     RUNG_SPACING_M, checked in close_after_turn() below
-# TODO: measure these on the table (and SENSOR_AHEAD_M on the robot). A pair
-# that is more than SENSOR_AHEAD_M apart must be removed.
-SENSOR_AHEAD_M = 0.20
-RUNG_SPACING_M = 0.12
-CLOSE_AFTER_TURN = (
-    ("START", "MIDDLE_LEFT", 0.15), ("START", "MIDDLE_RIGHT", 0.15), ("START", "TOP_CENTRE", 0.08),
-    ("JUNCTION_GREEN_1", "JUNCTION_GREEN_2", 0.17), ("JUNCTION_GREEN_2", "JUNCTION_GREEN_1", 0.17),
-    ("JUNCTION_RED_1", "JUNCTION_RED_2", 0.17), ("JUNCTION_RED_2", "JUNCTION_RED_1", 0.17),
-)
+DISTANCE_TO_SCAN_PICK_UP = 150
+DISTANCE_TO_PICK_UP = 20
+SCAN_TURN_TIME = 100
 
 
-def close_after_turn(a, b):
-    """ADDED (2026-10-20): if node b is so close to node a that, after the
-    robot turns on the spot at a, its line sensors are already past b,
-    return the distance between them (metres); otherwise None. See
-    CLOSE_AFTER_TURN above. Neighbouring drop junctions on the same line,
-    e.g. JUNCTION_LEFT_BOTTOM_DROP_2 and _3, are RUNG_SPACING_M apart."""
-    for first, second, distance in CLOSE_AFTER_TURN:
-        if (first, second) == (a, b):
-            return distance
-    if a.startswith("JUNCTION_") and b.startswith("JUNCTION_") and "_DROP_" in a and "_DROP_" in b:
-        same_line = a[:-1] == b[:-1]                   # same name apart from the slot number
-        if same_line and abs(int(a[-1]) - int(b[-1])) == 1:
-            return RUNG_SPACING_M
-    return None
 
 
 def corrections(robot, motor3, motor4, motor_speed3=TURN_SPEED, motor_speed4=TURN_SPEED, reverse=None):
@@ -175,6 +148,9 @@ def wait_for_start(button):
 def main():
     # Status booleans
     turning=False   # Checks if the turning sequence is running so we just start it once
+    picking_up=False
+    scantime=0
+    movetime=0
     traffic=False   # Is there traffic? If so, stop all
     moving=False 
     reversing=False # Is the robot reversing or not?
@@ -350,24 +326,14 @@ def main():
                         robot.queue = robot.queue[:-2]+[robot.queue[-1]]
                         print(robot.queue)
 
-                    # ADDED (2026-10-20): next_item already behind the line
-                    # sensors (see CLOSE_AFTER_TURN at the top). If the robot is
-                    # about to TURN here and next_item is closer than the
-                    # sensors are in front of the wheels, the sensors will be
-                    # past it after the turn and never see it. Count it as
-                    # reached at once: drop the "straight" (the drive to it)
-                    # and move the position on; the turn itself still happens.
-                    # Example: START -> MIDDLE_LEFT, where the start box edge is
-                    # ~15 cm from START (this replaces the START.west "map
-                    # bodge" in MAP.py, which only worked for the first move).
-                    here = robot.position
-                    gap = close_after_turn(here, next_item)
-                    if (gap is not None and robot.queue
-                            and isinstance(robot.queue[-1], list) and robot.queue[-1][1] != "straight"):
-                        robot.queue = robot.queue[:-2] + [robot.queue[-1]]
-                        robot.position = next_item
-                        after_turn_forward_ms = int(NODE_FORWARD_MS * gap / SENSOR_AHEAD_M)
-                        print("%s is already behind the line sensors after the turn" % next_item)
+                    # Stops errors with turning because line spacing is too small
+                    # If next is a junction and currently at a junction and came from a drop, then add a small reverse
+                    if ((bool(re.match(r"^JUNCTION.*DROP",next_item))) 
+                        and (bool(re.match(r"^JUNCTION.*DROP",robot.position))) 
+                        and bool(re.match(r"^(?!.*JUNCTION).*DROP",robot.previous_position))):
+                        # Remove straight
+                        robot.queue = robot.queue[:-1]+["reverse_straight"]+[robot.queue[-1]]
+                        print(robot.queue)
 
                     # ADDED (2026-10-20): traffic light. If the stretch from
                     # here to next_item is in config.TRAFFIC_LIGHT_EDGES (the
@@ -375,17 +341,10 @@ def main():
                     # between the turn and the drive. move_to() ended the queue
                     # with [..., "straight", turn] and the queue is used from
                     # the END, so this becomes: turn -> wait_light -> straight.
-                    if (here, next_item) in config.TRAFFIC_LIGHT_EDGES:
+                    if (robot.position, next_item) in config.TRAFFIC_LIGHT_EDGES:
                         robot.queue = robot.queue[:-1] + ["wait_light", robot.queue[-1]]
 
-                    # ADDED (2026-10-20): look into a drop slot before driving
-                    # in. When next_item is a drop slot (e.g. LEFT_BOTTOM_DROP_3),
-                    # put "check_slot" between the turn into the slot and the
-                    # drive in: turn -> check_slot -> straight -> drop_off.
-                    # After the turn the robot is at the junction, facing the
-                    # slot, far enough away for the distance sensor to measure.
-                    if "_DROP_" in next_item and not next_item.startswith("JUNCTION_"):
-                        robot.queue = robot.queue[:-1] + ["check_slot", robot.queue[-1]]
+    
 
                 else:
                     robot.mode=next_item
@@ -474,25 +433,6 @@ def main():
                         robot.stop(motor3, motor4)
                         tasks.light_reset()
                         print("waiting for the traffic light")
-                    elif next_item == "check_slot":
-                        # ADDED (2026-10-20): the robot has turned to face a drop
-                        # slot (see "check_slot" above). If the front distance
-                        # sensor sees a box in it, mark the slot "OCCUPIED", drop
-                        # the drive in ("straight") and the "drop_off" from the
-                        # queue, and plan the delivery again: "deliver" picks the
-                        # next free slot (when all are full it resets them, as
-                        # before). The wheels are already on the junction, so the
-                        # next turn starts without driving forwards (skip_forward).
-                        robot.stop(motor3, motor4)
-                        if tasks.slot_occupied():
-                            print("slot %s already has a box (%s mm) - trying the next slot"
-                                  % (robot.final_objective, tasks.last_slot_mm))
-                            map[robot.final_objective]["type"]="OCCUPIED"
-                            robot.queue.pop()          # "straight" (drive into the slot)
-                            robot.queue.pop()          # "drop_off"
-                            robot.queue.append("deliver")
-                            skip_forward=True
-                        robot.mode=""
             
             elif robot.mode == "straight":
 
@@ -549,28 +489,6 @@ def main():
                 # There are two ways we can do this. Either turn for a certain amount of time, or turn until fron sensors trigger
                 # If straight, then go straight for a bit so that it doesn't immediately trigger junction hit again?
             
-            
-                # FIX (2026-10-15): the turn did not actually turn. Changes:
-                #  1. Time units: `now` is in MILLISECONDS, so the old
-                #     time_count=now+2 gave only 2 ms of driving forward and 2 ms
-                #     of turning. Now: NODE_FORWARD_MS forward (or the 4th entry
-                #     of the turning item, e.g. ["turning", "left", 90, 0]), and
-                #     at least TURN_MIN_MS of turning.
-                #  2. End of the turn: before, it ended as soon as both centre
-                #     sensors saw a line, but at a junction they are still on the
-                #     OLD line when the turn starts, so it ended at once. Now the
-                #     centre sensors must first leave the old line (both black,
-                #     left_old_line) and then both find the new line.
-                #  3. Turn on the spot (spin(): one wheel forwards, one
-                #     backwards) instead of Robot.left / Robot.right, which pivot
-                #     about one stopped wheel and so move the robot off the
-                #     junction while turning.
-                #  4. corrections() is no longer called while driving forward
-                #     onto the junction: it switched the mode to "correction" and
-                #     queued the string "turning", which the queue code cannot
-                #     run, so the robot got stuck.
-                #  5. A "straight" turn now also resets `turning`; before, it
-                #     stayed True and the NEXT turn skipped its start-up step.
                 # CHANGED (2026-10-20): skip_forward (see the top of main()): no
                 # driving forwards before this turn, the wheels are already on
                 # the junction.
@@ -661,14 +579,101 @@ def main():
                             # ADDED (2026-10-20): see CLOSE_AFTER_TURN.
                             next_forward_ms = after_turn_forward_ms
                             after_turn_forward_ms = None
+                            
+                            
+                            
             elif robot.mode == "pick_up":
-                #Do some actual grabbing stuff etc
-                robot.previous_position=robot.position
-                robot.position=robot.objective
-                print(robot.position)
-                utime.sleep(1)
-                print("GRABBING STUFF")
                 
+                if not picking_up:
+                    #Do some actual grabbing stuff etc
+                    robot.previous_position=robot.position
+                    robot.position=robot.objective
+                    print(robot.position)
+                    utime.sleep(1)
+                    print("GRABBING STUFF")
+                    # Turning hasn't started, do the turns
+                    picking_up=True
+                    robot.mode_extra_specific="scan"
+                    
+                    
+                    readings = []
+                    time_count=now+SCAN_TURN_TIME
+                    scantime=now
+                    robot.spin(motor3, motor4, "left", TURN_SPEED)
+                    
+
+                elif robot.mode_extra_specific=="scan":
+                    if now>=time_count and motor3.return_state()==-1:
+                        time_count+=SCAN_TURN_TIME*2
+                        robot.spin(motor3, motor4, "right", TURN_SPEED/2)
+                    elif now>=time_count and motor3.return_state()==1:
+                        time_count+=SCAN_TURN_TIME*2
+                        robot.spin(motor3, motor4, "left", TURN_SPEED/2)
+                    
+                    if now%5==0:
+                        if tasks.front_tof.poll():
+                            d = tasks.front_tof.get_distance()
+                            if d is not None:
+                                readings.append(d)
+                        mean_scan=mean(readings[-10:])
+                        if mean_scan<DISTANCE_TO_SCAN_PICK_UP:
+                            scantime=now-scantime
+                            robot.mode_extra_specific="move_straight"
+                            robot.forward(motor3,motor4,DRIVE_SPEED/2)
+                            movetime=now
+                            time_count=now+500
+                            
+                            
+                elif robot.mode_extra_specific=="move_straight":
+                    if now>=time_count and motor3.return_state()==1:
+                        time_count+=500
+                        robot.forward(motor3,motor4,DRIVE_SPEED/2, reverse=True)
+                    elif now>=time_count and motor3.return_state()==-1:
+                        # Go back to scan if see nothing
+                        robot.mode_extra_specific="scan"
+                        robot.spin(motor3, motor4, "left", TURN_SPEED/2)
+                    
+                    if tasks.front_tof.poll():
+                        d = tasks.front_tof.get_distance()
+                        if d is not None:
+                            readings.append(d)
+                    mean_scan=mean(readings[-10:])
+                    if mean_scan<DISTANCE_TO_PICK_UP:
+                        movetime=now-movetime
+                        robot.mode_extra_specific="pick_up_grab_start"
+                        robot.stop(motor3,motor4)
+                
+                elif robot.mode_extra_specific=="pick_up_grab_start":
+                    pole = tasks.read_pole()
+                    if pole:
+                        level = tasks.level_for_pole(pole)
+                        robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                    else:
+                        # In case it can't see it
+                        print("CANT SEE")
+                        robot.mode="move_straight"
+                        robot.forward(motor3,motor4,DRIVE_SPEED/2)
+                        time_count=now+500
+                    # Engage servos
+                    # Do the whole servo grabbing motion
+                    utime.sleep_ms(100)
+                    robot.mode_extra_specific="return_straight"
+                    time_count=now+movetime%500
+                    robot.forward(motor3,motor4, DRIVE_SPEED/2)
+                    
+                elif robot.mode_extra_specific=="return_straight":
+                    if now>=time_count:
+                        robot.mode_extra_specific="return turn"
+                        time_count=now+scantime%SCAN_TURN_TIME
+                        if scantime%(SCAN_TURN_TIME*4)+SCAN_TURN_TIME<SCAN_TURN_TIME*2:
+                            robot.spin(motor3,motor4,"right", TURN_SPEED/2)
+                        else:
+                            robot.spin(motor3,motor4,"left", TURN_SPEED/2)
+                elif robot.mode_extra_specific=="return_turn":  
+                    if now>=time_count:
+                        map[robot.final_objective]["type"]="COLLECTED"
+                        robot.mode=""
+                        robot.has_box=True
                 
                 
                 
@@ -681,16 +686,12 @@ def main():
                 # config.MAG_POLE_LEVEL turns that into "TOP" / "BOTTOM"
                 # (MAG_NO_POLE_LEVEL if no magnet was found). "deliver" reads
                 # drop_off_info[1]: 0 -> BOTTOM_ slots, 1 -> TOP_ slots.
-                pole = tasks.read_pole()
-                level = tasks.level_for_pole(pole)
-                robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                
                 print("box magnet: %s (strongest field %s mV) -> %s level" % (
                     pole if pole else "NOT FOUND", tasks.last_field_mv, level))
-                map[robot.final_objective]["type"]="COLLECTED"
-                robot.mode=""
-                robot.has_box=True
+                    
             
-                pass
+                
             elif robot.mode == "drop_off":
                 #Do some actual grabbing stuff etc
                 utime.sleep(2)
@@ -730,11 +731,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # ADDED (2026-10-15, safety): always switch both drive motors off when the
-    # program ends for ANY reason (Ctrl-C in the REPL, an exception, ...).
-    # Without this the PWM outputs keep their last duty cycle and the wheels
-    # keep turning after the program has stopped. GP5 and GP6 are the PWM
-    # pins of motor3 (PWM1) and motor4 (PWM2); setting the duty to 0 stops them.
+
     try:
         main()
     finally:

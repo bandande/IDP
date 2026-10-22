@@ -82,8 +82,11 @@ class TaskSensors:
     def from_config(cls):
         """Start the three task sensors; any that fails is left out (warning printed)."""
         parts = []
-        for name, factory in (("magnet sensor", make_magnet), ("front distance sensor", make_front_tof),
-                              ("IR receiver", make_ir)):
+        for name, factory in (
+                ("magnet sensor", make_magnet), 
+                ("front distance sensor", make_front_tof),
+                ("IR receiver", make_ir)
+            ):
             try:
                 parts.append(factory())
             except Exception as e:   # a missing sensor must not stop the robot
