@@ -554,15 +554,22 @@ def main():
                         # In case it can't see it
                         print("CANT SEE")
                         robot.mode="move_straight"
-                        robot.forward(motor3,motor4,c.DRIVE_SPEED/2)
+                        robot.forward(motor3,motor4,c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
                         time_count=now+500
                         continue
                     # Engage servos
+                    
+                    print("SERVO1 set angle:" +str(10))
+                    servo1.set_angle(10)
+                    utime.sleep_ms(500)
+                    print("SERVO2 set angle:" +str(10))
+                    servo2.set_angle(10)
+                    utime.sleep_ms(500)
+                    
                     # Do the whole servo grabbing motion
-                    utime.sleep_ms(100)
                     robot.mode_extra_specific="return_straight"
                     time_count=now+movetime%500
-                    robot.forward(motor3,motor4, c.DRIVE_SPEED/2, reverse=True)
+                    robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
                     
                 elif robot.mode_extra_specific=="return_straight":
                     if now>=time_count:
@@ -689,4 +696,8 @@ if __name__ == "__main__":
     finally:
         for pwm_pin in (5, 6):
             machine.PWM(machine.Pin(pwm_pin)).duty_u16(0)
+        for servo in [Servo(pin) for name, pin in config.SERVO_PINS.items()]:
+            servo.set_angle(0)
+            servo.off()
+
         print("motors stopped")
