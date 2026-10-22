@@ -135,13 +135,22 @@ MAG_READ_MS = 400              # watch the magnet sensor this long at a pick-up
 MAG_NORTH_SIGN = 1             # TODO measure: sign of the field (+1 / -1) when a NORTH pole faces the sensor
 MAG_POLE_LEVEL = {"north": "TOP", "south": "BOTTOM"}   # TODO: the task rule (pole -> rack level)
 MAG_NO_POLE_LEVEL = "BOTTOM"   # level used when no magnet is found
-# Front distance sensor: is the drop slot already full? (the other ToF is not used)
+# Front distance sensor: is the drop slot already full?
 FRONT_TOF = "dist1"            # TODO check: which of TOF_SENSORS faces forward
 SLOT_READ_MS = 250             # collect readings this long in front of a slot
 SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from its junction (turned
                                # to face it, before driving in). A box anywhere in the slot - also one
                                # put in from the other side of the rack - is closer than this; an
                                # empty slot reads further (or nothing). Measure both on the table.
+# Grab distance sensor (the second ToF): how far away the box to pick up is,
+# for aiming at it and driving up to it (TaskSensors.box_distance_now() etc.).
+# How it is used is still being decided. The starting values are the ones in
+# main.py's grabbing draft (DISTANCE_TO_SCAN_PICK_UP / DISTANCE_TO_PICK_UP).
+GRAB_TOF = "dist2"             # TODO check: which of TOF_SENSORS is the grab / aiming sensor
+GRAB_READ_MS = 150             # box_distance(): collect readings this long (robot standing still)
+GRAB_SEE_MM = 150              # TODO measure: closer than this = a box is in front of the sensor
+GRAB_REACH_MM = 20             # TODO measure: this close or closer = close enough to grab. The VL53L0X
+                               # is not reliable below ~30 mm: check the real reading at grab distance.
 # Traffic light (IR receiver). Before driving along a line listed here (pairs
 # of node names from MAP.py), the robot stops and waits for green.
 # The light is at the ramp entrance: the robot waits at START before driving
@@ -295,6 +304,12 @@ def validate():
     # task sensors
     if FRONT_TOF not in [t["name"] for t in TOF_SENSORS]:
         problems.append("FRONT_TOF %r is not one of TOF_SENSORS" % (FRONT_TOF,))
+    if GRAB_TOF not in [t["name"] for t in TOF_SENSORS]:
+        problems.append("GRAB_TOF %r is not one of TOF_SENSORS" % (GRAB_TOF,))
+    if GRAB_TOF == FRONT_TOF:
+        problems.append("GRAB_TOF and FRONT_TOF must be two different sensors")
+    if GRAB_REACH_MM >= GRAB_SEE_MM:
+        problems.append("GRAB_REACH_MM must be smaller than GRAB_SEE_MM")
     if MAG_NORTH_SIGN not in (1, -1):
         problems.append("MAG_NORTH_SIGN must be 1 or -1")
     for pole in ("north", "south"):

@@ -89,7 +89,7 @@ Sensor modules
 | `actuators/leds.py` | `StatusLeds.from_config()`, `.set("green", True)`, `.show(red=True)`, `.off()` |
 | `control/line_follower.py` | `LineFollower.from_config()`, `.start(plan=None)`, `.update(bits)` -> (left, right), `.stop()`, `.state`, `.reason` |
 | `control/start_stop.py` | `StartStopButton.from_config()`, `.pressed()` (True once per press) |
-| `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()`, `.light_reset()`, `.light_update()` -> "red" / "green" |
+| `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()` (front sensor), `.box_distance_now()` / `.box_distance()` -> mm or None, `.box_seen(d)`, `.box_in_reach(d)` (grab sensor), `.light_reset()`, `.light_update()` -> "red" / "green"; the two distance sensors themselves are `.front_tof` and `.grab_tof` |
 | `actuators/servo.py` | `Servo(pin)`, `.set_angle(deg)` (0-270), `.angle()` (last angle set), `.off()` |
 
 ### The main program (`main.py`)

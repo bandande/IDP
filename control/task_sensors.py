@@ -5,15 +5,20 @@ Sensors used by the TASK logic in main.py (line following does not need them).
     level (TOP / BOTTOM) the box must go to.          read_pole(), level_for_pole()
   * Front distance sensor (one VL53L0X, config.FRONT_TOF) at a drop slot ->
     is there already a box in the slot?               slot_occupied()
+  * Grab distance sensor (the second VL53L0X, config.GRAB_TOF): how far away
+    is the box to pick up? For aiming at it and driving up to it.
+                                                      box_distance_now(), box_distance(),
+                                                      box_seen(), box_in_reach()
   * IR receiver at the traffic light -> may the robot go?
                                                       light_reset(), light_update()
-The second distance sensor is not used.
 
 Every sensor is optional: if one does not start (not wired, I2C error, ...)
 the matching check falls back to a safe default and a warning is printed,
 so the rest of the task still runs:
   * no magnet sensor / no magnet found -> config.MAG_NO_POLE_LEVEL
   * no front distance sensor / no reading -> the slot is treated as FREE
+  * no grab distance sensor -> box distances are None (no box seen); the
+    caller decides what to do then (e.g. drive a fixed time instead)
   * no IR receiver -> the light is treated as GREEN
 
 Usage (see main.py)
@@ -22,11 +27,14 @@ Usage (see main.py)
     pole = tasks.read_pole()             # "north", "south" or None (blocking, MAG_READ_MS)
     level = tasks.level_for_pole(pole)   # "TOP" or "BOTTOM"
     full = tasks.slot_occupied()         # True / False (blocking, SLOT_READ_MS)
+    d = tasks.box_distance_now()         # grab sensor, every loop while moving: mm or None
+    if tasks.box_in_reach(d): ...        # close enough to grab (config.GRAB_REACH_MM)
     tasks.light_reset()                  # when the robot stops at the light
     state = tasks.light_update()         # every loop: "red" or "green"
 
-The factory functions make_magnet / make_front_tof / make_ir build the real
-sensors; the PC simulator (sim/) replaces them with simulated ones.
+The factory functions make_magnet / make_front_tof / make_grab_tof / make_ir
+build the real sensors; the PC simulator (sim/) replaces them with
+simulated ones.
 """
 
 from utime import ticks_ms, ticks_diff, sleep_ms
@@ -39,21 +47,33 @@ def make_magnet():
     return HallSensor.from_config()
 
 
-def make_front_tof():
-    """Start only the forward-facing VL53L0X (config.FRONT_TOF)."""
+def _start_tof(name, role):
+    """Start only the VL53L0X called `name` in config.TOF_SENSORS (`role` is
+    used in error messages). The two sensors are on separate I2C buses, so
+    each can be started on its own."""
     from sensors.tof import setup_tof_sensors
-    specs = [s for s in config.TOF_SENSORS if s["name"] == config.FRONT_TOF]
+    specs = [spec for spec in config.TOF_SENSORS if spec["name"] == name]
     if not specs:
-        raise ValueError("config.FRONT_TOF = %r is not in config.TOF_SENSORS" % (config.FRONT_TOF,))
+        raise ValueError("%s distance sensor %r is not in config.TOF_SENSORS" % (role, name))
     sensors = setup_tof_sensors(specs, config.I2C_FREQ_HZ,
                                 max_valid_mm=config.TOF_MAX_VALID_MM,
                                 median_size=config.TOF_MEDIAN_SIZE,
                                 long_range=config.TOF_LONG_RANGE,
                                 stale_ms=config.TOF_STALE_MS)
-    tof = sensors[config.FRONT_TOF]
+    tof = sensors[name]
     if not tof.available:
-        raise OSError("front distance sensor %s did not start: %s" % (config.FRONT_TOF, tof.last_error))
+        raise OSError("%s distance sensor %s did not start: %s" % (role, name, tof.last_error))
     return tof
+
+
+def make_front_tof():
+    """Start only the forward-facing VL53L0X (config.FRONT_TOF): drop slot check."""
+    return _start_tof(config.FRONT_TOF, "front")
+
+
+def make_grab_tof():
+    """Start only the second VL53L0X (config.GRAB_TOF): aiming at a box to pick up."""
+    return _start_tof(config.GRAB_TOF, "grab")
 
 
 def make_ir():
@@ -67,12 +87,17 @@ def _median(values):
 
 
 class TaskSensors:
-    def __init__(self, magnet=None, front_tof=None, ir=None):
+    def __init__(self, magnet=None, front_tof=None, ir=None, grab_tof=None):
         self.magnet = magnet
         self.front_tof = front_tof
         self.ir = ir
+        # The grab sensor has the same interface as front_tof (poll(),
+        # get_distance(), distance_mm), so code written for one works with
+        # the other: tasks.grab_tof.poll(), tasks.grab_tof.get_distance().
+        self.grab_tof = grab_tof
         self.last_field_mv = None     # strongest field seen by the last read_pole()
         self.last_slot_mm = None      # median distance of the last slot_occupied()
+        self.last_box_mm = None       # median distance of the last box_distance()
         self._ir_seen = None          # light_update(): time of the last IR activity
         self._ir_on_since = None      # light_update(): start of the current unbroken IR stretch
         self._light_start = None
@@ -80,12 +105,13 @@ class TaskSensors:
 
     @classmethod
     def from_config(cls):
-        """Start the three task sensors; any that fails is left out (warning printed)."""
+        """Start the four task sensors; any that fails is left out (warning printed)."""
         parts = []
         for name, factory in (
-                ("magnet sensor", make_magnet), 
+                ("magnet sensor", make_magnet),
                 ("front distance sensor", make_front_tof),
-                ("IR receiver", make_ir)
+                ("IR receiver", make_ir),
+                ("grab distance sensor", make_grab_tof),
             ):
             try:
                 parts.append(factory())
@@ -156,6 +182,58 @@ class TaskSensors:
             return False      # nothing within range: the slot is open / empty
         self.last_slot_mm = _median(readings)
         return self.last_slot_mm < config.SLOT_OCCUPIED_MM
+
+    # -- grab distance sensor: aiming at a box to pick up ------------------------
+    # How exactly the robot aims is still being decided. A typical use:
+    #   * while turning slowly from side to side, call box_distance_now() every
+    #     loop; the heading with the SMALLEST distance points at the box;
+    #   * then creep forwards, calling box_distance_now() every loop, and stop
+    #     as soon as box_in_reach(distance) is True;
+    #   * standing still, box_distance() gives a steadier value (a median).
+    # Note: the VL53L0X does not measure reliably closer than about 30 mm, so
+    # check what it really reads at grabbing distance before setting
+    # config.GRAB_REACH_MM.
+    def box_distance_now(self):
+        """Non-blocking: the newest filtered distance (mm) from the grab sensor,
+        or None (nothing in range, reading too old, or no grab sensor). Call it
+        every loop while the robot moves (the sensor gives ~30 new values / s)."""
+        if self.grab_tof is None:
+            return None
+        self.grab_tof.poll()
+        return self.grab_tof.get_distance()
+
+    def box_distance(self, read_ms=None):
+        """Blocking: the median distance (mm) seen by the grab sensor during
+        read_ms (default config.GRAB_READ_MS), or None if nothing was in range.
+        Use it while the robot stands still."""
+        self.last_box_mm = None
+        if self.grab_tof is None:
+            return None
+        if read_ms is None:
+            read_ms = config.GRAB_READ_MS
+        readings = []
+        start = ticks_ms()
+        while ticks_diff(ticks_ms(), start) < read_ms:
+            if self.grab_tof.poll():
+                d = self.grab_tof.get_distance()
+                if d is not None:
+                    readings.append(d)
+            sleep_ms(5)
+        if readings:
+            self.last_box_mm = _median(readings)
+        return self.last_box_mm
+
+    @staticmethod
+    def box_seen(distance_mm):
+        """True if a distance from the grab sensor means "a box is in front"
+        (closer than config.GRAB_SEE_MM)."""
+        return distance_mm is not None and distance_mm < config.GRAB_SEE_MM
+
+    @staticmethod
+    def box_in_reach(distance_mm):
+        """True if a distance from the grab sensor means "close enough to grab"
+        (config.GRAB_REACH_MM or closer)."""
+        return distance_mm is not None and distance_mm <= config.GRAB_REACH_MM
 
     # -- traffic light ---------------------------------------------------------
     def light_reset(self):

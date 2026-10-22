@@ -161,6 +161,7 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
     # Task sensors: magnet (real driver on the fake ADC), IR receiver (real
     # driver on the fake pin), front distance sensor (simulated object).
     task_sensors.make_front_tof = lambda: SimToF(world)
+    task_sensors.make_grab_tof = lambda: SimToF(world)   # grab sensor: also looks straight ahead
     pad_poles = dict(DEFAULT_POLES)
     for name, pole in (poles or {}).items():
         pad_poles[sim_name(name)] = pole
