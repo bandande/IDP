@@ -1,11 +1,14 @@
 from MAP import MAP
-import constants
+import constants as c
 from collections import deque
 from motor import Motor
+from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
+import utime
+import config
 
 def degrees_to_time(degrees):
     count=0
-    count=constants.full_turn_time*degrees/360
+    count=c.full_turn_time*degrees/360
     return count
 
 def turn_to_direction(current_direction, turn):
@@ -336,8 +339,73 @@ class Robot:
         # This can be called to see which kinds of junction it can be
         pass
     
-
+def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c.TURN_SPEED, reverse=None, time_count=0):
+    if reverse:
+        if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
+            # If left front sensor does not detect and right does
+            robot.queue.append(robot.mode)
+            
+            robot.mode="correction"
+            robot.right(motor3,motor4,motor_speed3, motor_speed4, reverse=reverse)
+            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+            time_count=time_count-now
+            #Then turn right
+            
+        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+            # If left front sensor does not detect and right does
+            robot.queue.append(robot.mode)
+            robot.mode="correction"
+            robot.left(motor3,motor4,motor_speed3, motor_speed4, reverse=reverse)
+            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+            time_count=time_count-now
+            #Then turn left
+    else:
+        if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
+            # If left front sensor does not detect and right does
+            robot.queue.append(robot.mode)
+            robot.mode="correction"
+            robot.right(motor3,motor4,motor_speed3, motor_speed4)
+            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+            time_count=time_count-now
+            #Then turn right
+            
+        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+            # If left front sensor does not detect and right does
+            robot.queue.append(robot.mode)
+            robot.mode="correction"
+            robot.left(motor3,motor4,motor_speed3, motor_speed4)
+            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+            time_count=time_count-now
+            #Then turn left
         
+def update_sensors(sensors, robot):
+    robot.left_sensor_previous=robot.left_sensor
+    robot.front_left_sensor_previous=robot.front_left_sensor
+    robot.front_right_sensor_previous=robot.front_right_sensor
+    robot.right_sensor_previous=robot.right_sensor
+    
+    bits = sensors.read()
+    robot.left_sensor = 1 if bits & OUTER_LEFT else 0
+    robot.front_left_sensor = 1 if bits & INNER_LEFT else 0
+    robot.front_right_sensor = 1 if bits & INNER_RIGHT else 0
+    robot.right_sensor = 1 if bits & OUTER_RIGHT else 0
+
+
+def wait_for_start(button):
+    """ADDED (2026-10-15, safety): block until the start/stop button is pressed.
+
+    The button is the crash sensor named in config.START_STOP_SENSOR (default
+    "left" = Crash Sensor L, physical pin 12). Because the Pico runs main.py
+    by itself at power-up, waiting here stops the robot from driving off as
+    soon as it is switched on. After the press it waits config.START_DELAY_MS
+    so the hand that pressed the button is clear of the robot.
+    """
+    print("press the start/stop button (%s crash sensor) to start" % config.START_STOP_SENSOR)
+    while not button.pressed():
+        utime.sleep_ms(5)
+        # print("hello")
+    print("starting in %d ms" % config.START_DELAY_MS)
+    utime.sleep_ms(config.START_DELAY_MS)
     
 
 
