@@ -406,8 +406,81 @@ def wait_for_start(button):
         # print("hello")
     print("starting in %d ms" % config.START_DELAY_MS)
     utime.sleep_ms(config.START_DELAY_MS)
-    
 
 
+def button_check(button, is_started, robot, motor3, motor4):
+    '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
+    pressed = button.pressed()
+    if pressed:
 
+        if is_started:
+            # CHANGED (2026-10-20): two kinds of stop (the button is the left
+            # front crash sensor, so bumping into something also stops):
+            #   * SHORT press = PAUSE: the motors stop and the robot keeps
+            #     everything (position, queue, mode, timers). The next press
+            #     continues exactly where it stopped.
+            #   * LONG press (held for LONG_PRESS_MS) = STOP AND RESET: the
+            #     robot forgets its route and position (robot.reset(): START,
+            #     facing north). Put it back in the start box, then press to
+            #     start again. What it has collected / delivered so far stays
+            #     marked in the map.
+            # (The old 2 x utime.sleep(1) after a stop were removed: a press
+            # during them was remembered and restarted the robot at once.)
+
+            # FIX (2026-10-20): read the button ONCE per loop. button.pressed()
+            # returns True only once for each press. The old code called it twice:
+            #     if button.pressed() and not is_started:    (1)
+            #     ...
+            #         if button.pressed():                   (2)
+            # While the robot was running, call (1) used up the press and then
+            # threw it away (because is_started was True), so call (2) almost
+            # never saw it: that is why the button sometimes did not stop the
+            # robot.
+
+
+            # Remember what both motors were doing, so a pause can resume.
+            saved_motors = [(m.mDir.value(), m.pwm.duty_u16()) for m in (motor3, motor4)]
+            robot.stop(motor3, motor4)
+            pause_start = utime.ticks_ms()
+            long_press = False
+            while button.held():
+                button.pressed()          # keeps the button's debouncer up to date
+                if utime.ticks_diff(utime.ticks_ms(), pause_start) >= c.LONG_PRESS_MS:
+                    long_press = True
+                    break
+                utime.sleep_ms(10)
+            if long_press:
+                print("STOP AND RESET: put the robot back in the start box, then press to start")
+                while button.held():      # wait until the button is let go
+                    button.pressed()
+                    utime.sleep_ms(10)
+                robot.reset()
+                turning=False
+                reversing=False
+                skip_forward=False
+                holdoff_until=0
+                at_start=True
+                wait_for_start(button)
+                robot.start = utime.ticks_ms()
+            else:
+                print("PAUSED: press the button again to continue from here")
+                while not button.pressed():
+                    utime.sleep_ms(5)
+                utime.sleep_ms(config.START_DELAY_MS)   # hand clear of the robot
+                # Shift the time reference by the length of the pause, so
+                # `now` does not jump and every running timer (time_count)
+                # still has the time it had left before the pause.
+                paused_ms = utime.ticks_diff(utime.ticks_ms(), pause_start)
+                robot.start = utime.ticks_add(robot.start, paused_ms)
+                for m, (direction, duty) in zip((motor3, motor4), saved_motors):
+                    m.mDir.value(direction)
+                    m.pwm.duty_u16(duty)
+                print("continuing after a %d ms pause" % paused_ms)
+            pass
+        
+        else:
+            is_started=True
+            print("Started")
+            pressed = False          # this press only started the robot
+            
 
