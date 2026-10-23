@@ -605,7 +605,7 @@ class ServoPage(tk.Frame):
         Shift + Left / Right five steps at once
         1 / 2                select servo1 / servo2 (or click its card)
         x                    selected servo limp (no pulses)
-        r                    safe reset (config.SERVO_RESET: servo2 222 -> 250
+        r                    safe reset (config.SERVO_RESET: servo2 220 -> 250
                              slowly, servo1 to the middle of its safe range).
                              A limp servo always starts with this reset: the
                              first arrow key press on it sends the reset.
@@ -798,7 +798,7 @@ class ServoPage(tk.Frame):
 
     def reset(self, name):
         """ADDED (2026-10-23): ask the Pico for the servo's safe reset
-        (config.SERVO_RESET: servo2 222 -> 250 slowly; servo1 straight to the
+        (config.SERVO_RESET: servo2 220 -> 250 slowly; servo1 straight to the
         middle of its safe range). A limp servo can only be started this way.
         Keys for this servo wait until the Pico reports its angle again."""
         if self.is_locked(name):

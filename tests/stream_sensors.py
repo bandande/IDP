@@ -27,7 +27,7 @@ can type one command per line:
                     config.SERVO_SAFE_RANGE; a servo without one is not used)
     servo1 off      stop the pulses: servo1 goes limp
     servo2 reset    the safe way to the start position (config.SERVO_RESET:
-                    servo2 goes to 222, then slowly up to 250; servo1 goes
+                    servo2 goes to 220, then slowly up to 250; servo1 goes
                     to the middle of its safe range). A limp servo only
                     accepts "reset"; angles are refused until then.
 The viewer's "Grab / Servo" tab sends these when the arrow keys are pressed.
@@ -120,7 +120,7 @@ def servo_command(line, servos, events):
         return
     if parts[1] == "reset":
         # ADDED (2026-10-23): the safe way to the start position
-        # (config.SERVO_RESET, e.g. servo2 222 -> 250 slowly). The stream
+        # (config.SERVO_RESET, e.g. servo2 220 -> 250 slowly). The stream
         # pauses while it runs (about 1.6 s).
         angle = servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
         if servo.reset_path is None:

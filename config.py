@@ -197,15 +197,15 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # the supply down so far that the Pico resets (this happened on the bench).
 # actuators/servo.py clamps every angle into this range. None = not measured
 # yet: the sensor viewer / stream then refuse to move that servo at all.
-# CHANGED (2026-10-23): servo2 is now 222 - 270. 222 is its GRAB angle
+# CHANGED (2026-10-23): servo2 is now 220 - 270. 220 is its GRAB angle
 # (SERVO_GRAB_ANGLE below) and it must never go lower than that. Angles above
 # 270 need pulses longer than the servo's maximum of 2.5 ms (300 deg = 2.72 ms;
 # at 300 servo2 ran away and kept turning faster), so 270 is also a hard
 # limit in actuators/servo.py, whatever is written here.
-SERVO_SAFE_RANGE = {"servo1": (170, 195), "servo2": (222, 270)}
+SERVO_SAFE_RANGE = {"servo1": (170, 195), "servo2": (220, 270)}
 # ADDED (2026-10-23): the angle at which the gripper holds a box (measured
 # with the sensor viewer's Grab / Servo tab). servo2 never goes below it.
-SERVO_GRAB_ANGLE = {"servo2": 222}
+SERVO_GRAB_ANGLE = {"servo2": 220}   # CHANGED (2026-10-23): was 222
 # ADDED (2026-10-23): how a servo is RESET, i.e. brought to its start position
 # when it has had no pulses (after power-up, after a restart, after going
 # limp): (start, end) = go to `start`, wait SERVO_RESET_SETTLE_MS until it is
@@ -213,10 +213,10 @@ SERVO_GRAB_ANGLE = {"servo2": 222}
 # servo2 must always be reset this way, upwards towards 250: turning it the
 # other way can break the gripper. A servo not listed here is reset by going
 # straight to the middle of its safe range.
-# CHANGED (2026-10-23): servo2 reset now starts at 222 (was 200), its grab
+# CHANGED (2026-10-23): servo2 reset now starts at 220 (was 200), its grab
 # angle and the low end of its safe range; the direction (up to 250) is
 # unchanged.
-SERVO_RESET = {"servo2": (222, 250)}
+SERVO_RESET = {"servo2": (220, 250)}
 SERVO_RESET_SETTLE_MS = 600
 SERVO_RESET_STEP_MS = 20
 

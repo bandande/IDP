@@ -25,8 +25,8 @@ Usage
     from actuators.servo import Servo
     import config
     gripper = Servo(config.SERVO_PINS["servo2"])   # safe range / reset path from config.py
-    gripper.reset()             # REQUIRED first move after power-up: 222 -> 250, slowly
-    gripper.set_angle(240)      # always kept inside the safe range (222 - 270)
+    gripper.reset()             # REQUIRED first move after power-up: 220 -> 250, slowly
+    gripper.set_angle(240)      # always kept inside the safe range (220 - 270)
 """
 
 from machine import Pin, PWM
@@ -85,7 +85,7 @@ class Servo:
         With a reset_path (start, end): go to `start`, wait settle_ms so the
         servo has really arrived there, then turn slowly to `end`, one degree
         every step_ms. So the servo always finishes by moving from start to
-        end (servo2: 222 -> 250, the only direction that is safe for the
+        end (servo2: 220 -> 250, the only direction that is safe for the
         gripper). Without a reset_path: straight to the middle of the safe
         range. Every angle sent is inside the safe range. This WAITS until
         the servo is there (about 1.6 s for servo2). Returns the final angle."""

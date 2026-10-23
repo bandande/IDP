@@ -9,7 +9,7 @@ Stop with Ctrl-C (the servos then go limp).
 CHANGED (2026-10-23): it used to move every servo to 0, 135 and 270 degrees.
 The gripper cannot reach the whole range: driving it into its end stop
 stalls the servo, and the current can reset the Pico. Now:
-  * every servo starts with reset() (servo2: 222 -> 250 slowly, the only
+  * every servo starts with reset() (servo2: 220 -> 250 slowly, the only
     safe way; servo1: the middle of its safe range), done ONCE;
   * then each round: a servo WITHOUT a reset path (servo1) goes to the low
     end, the middle and the high end of its safe range; servo2 stays at the
