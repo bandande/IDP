@@ -18,13 +18,36 @@ The pin monitor shows the raw level of every header
 GPIO except the motor, servo and LED pins and the I2C pins in use. Unused
 pins get the internal pull-up, so an unconnected pin reads a steady 1.
 Stop with Ctrl-C.
+
+ADDED (2026-10-23): servo control for the gripper calibration. servo_pins:
+{name: GPIO} (default config.SERVO_PINS, {} = no servos). The servos stay
+limp (no pulses) until the PC sends a command. While the stream runs, the PC
+can type one command per line:
+    servo1 180      move servo1 to 180 degrees (kept inside its
+                    config.SERVO_SAFE_RANGE; a servo without one is not used)
+    servo1 off      stop the pulses: servo1 goes limp
+    servo2 reset    the safe way to the start position (config.SERVO_RESET:
+                    servo2 goes to 222, then slowly up to 250; servo1 goes
+                    to the middle of its safe range). A limp servo only
+                    accepts "reset"; angles are refused until then.
+The viewer's "Grab / Servo" tab sends these when the arrow keys are pressed.
+Every sample then reports the last angle of each servo ("servo" in @S).
 """
 
 import json
+import sys
 from machine import Pin
 from utime import sleep_ms, ticks_ms, ticks_diff
 
+# ADDED (2026-10-23): select.poll tells whether the PC has sent characters,
+# so the loop can read commands without waiting (blocking) for them.
+try:
+    import select
+except ImportError:
+    import uselect as select
+
 import config
+from actuators.servo import Servo
 from sensors.line_sensor import LineSensorArray
 from sensors.line_processing import LineTracker, JunctionDetector
 from sensors.tof import tof_from_config, make_i2c
@@ -49,8 +72,79 @@ def _emit(tag, obj):
     print(tag + json.dumps(obj))
 
 
+class CommandReader:
+    """ADDED (2026-10-23): collects the command lines the PC types while the
+    stream runs, without ever waiting for them.
+
+    lines() returns the complete lines received since the last call (usually
+    none). Ctrl-C is not a character here: it still stops the stream."""
+
+    def __init__(self):
+        self.text = ""
+        try:
+            self.poller = select.poll()
+            self.poller.register(sys.stdin, select.POLLIN)
+        except Exception:
+            self.poller = None      # no stdin polling on this port: commands are ignored
+
+    def lines(self):
+        done = []
+        if self.poller is None:
+            return done
+        count = 0
+        # poll(0) = "is a character waiting?" without waiting. At most 64
+        # characters per call, so the sensor loop is never held up for long.
+        while count < 64 and self.poller.poll(0):
+            ch = sys.stdin.read(1)
+            count += 1
+            if ch == "\n" or ch == "\r":
+                if self.text:
+                    done.append(self.text)
+                    self.text = ""
+            else:
+                self.text += ch
+        return done
+
+
+def servo_command(line, servos, events):
+    """ADDED (2026-10-23): carry out one command line, e.g. "servo1 135" or
+    "servo1 off". Problems are reported as events (shown in the viewer's log)."""
+    parts = line.split()
+    if len(parts) != 2 or parts[0] not in servos:
+        events.append("unknown command %r (expected e.g. 'servo1 135' or 'servo1 off')" % line)
+        return
+    servo = servos[parts[0]]
+    if parts[1] == "off":
+        servo.off()
+        events.append("%s off (limp)" % parts[0])
+        return
+    if parts[1] == "reset":
+        # ADDED (2026-10-23): the safe way to the start position
+        # (config.SERVO_RESET, e.g. servo2 222 -> 250 slowly). The stream
+        # pauses while it runs (about 1.6 s).
+        angle = servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
+        if servo.reset_path is None:
+            events.append("%s reset: straight to the middle of its safe range, %d deg" % (parts[0], angle))
+        else:
+            events.append("%s reset: %d -> %d deg, slowly" % (parts[0], servo.reset_path[0], angle))
+        return
+    try:
+        angle = float(parts[1])
+    except ValueError:
+        events.append("bad angle in %r" % line)
+        return
+    if servo.angle() is None:
+        # CHANGED (2026-10-23): a limp servo only starts with "reset"
+        events.append("%s has no pulses yet: send '%s reset' first" % (parts[0], parts[0]))
+        return
+    if angle < servo.low or angle > servo.high:
+        events.append("%s: %s deg is outside the safe range %d-%d, clamped" % (
+            parts[0], parts[1], servo.low, servo.high))
+    servo.set_angle(angle)     # clamped into the safe range by the Servo class
+
+
 def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=None, period_ms=50,
-           seconds=None, mag_pin=None):
+           seconds=None, mag_pin=None, servo_pins=None):
     if line_pins is None:
         line_pins = [config.LINE_OUTER_LEFT_PIN, config.LINE_INNER_LEFT_PIN,
                      config.LINE_INNER_RIGHT_PIN, config.LINE_OUTER_RIGHT_PIN]
@@ -126,6 +220,25 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
             if not s.available:
                 errors.append("tof %s not available: %s" % (name, s.last_error))
 
+    # ADDED (2026-10-23): the gripper servos. off() right after creating each
+    # one, so it gets no pulses (stays limp) until the PC sends a command.
+    # Each servo only accepts angles inside its config.SERVO_SAFE_RANGE; a
+    # servo without a safe range is left out (never moved).
+    if servo_pins is None:
+        servo_pins = config.SERVO_PINS
+    servos = {}
+    for name in sorted(servo_pins):
+        safe = config.SERVO_SAFE_RANGE.get(name)
+        if safe is None:
+            errors.append("servo %s left out: no safe range in config.SERVO_SAFE_RANGE" % name)
+            continue
+        try:
+            servos[name] = Servo(servo_pins[name], safe, config.SERVO_RESET.get(name))
+            servos[name].off()
+        except Exception as e:
+            errors.append("servo %s: %r" % (name, e))
+    commands = CommandReader()
+
     # One reader per monitored pin; reuse the driver's view of pins it owns.
     readers = []
     for gp in monitor:
@@ -156,6 +269,9 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
         "tof": list(tofs),
         "scan": scan,
         "max_mm": config.TOF_MAX_VALID_MM,
+        # ADDED (2026-10-23): [name, GPIO, safe low, safe high, reset path or None] per servo
+        "servo": [[name, servo_pins[name], servos[name].low, servos[name].high, servos[name].reset_path]
+                  for name in sorted(servos)],
         "errors": errors,
     })
 
@@ -193,6 +309,9 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
                     events.append("ir frame %d marks, mean mark %d us, mean space %d us, nec=%s, frame=%s" % (
                         n, mark, space, decode_nec(frame), frame[:100]))
                     frame = ir.get_frame()
+            # ADDED (2026-10-23): servo commands typed by the PC (viewer).
+            for text in commands.lines():
+                servo_command(text, servos, events)
 
             if ticks_diff(now, last_emit) >= period_ms:
                 last_emit = now
@@ -212,6 +331,9 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
                 if mag is not None:
                     msg["mag"] = [mag.mv if mag.mode == "analog" else mag.raw(), mag.detected,
                                   mag.field_mv, mag.polarity, mag.detections, mag.baseline_mv]
+                if servos:
+                    # ADDED (2026-10-23): last angle set per servo (None = limp)
+                    msg["servo"] = [[name, servos[name].angle()] for name in sorted(servos)]
                 if events:
                     msg["ev"] = events
                     events = []
@@ -227,6 +349,8 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
             bumpers.right.deinit()
         for s in tofs.values():
             s.stop()
+        for s in servos.values():   # ADDED (2026-10-23): servos limp when the stream stops
+            s.off()
         print("@E stopped")
 
 
