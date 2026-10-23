@@ -19,15 +19,21 @@ with its I2C bus scan, a continuous distance-vs-time curve (solid = filtered,
 dashed = raw), noise statistics and an offset calibration helper;
 "Magnetic" shows the Hall sensor voltage as a continuous curve with its
 zero-field baseline and detection thresholds.
+"Grab / Servo" (ADDED 2026-10-23) is for calibrating the gripper: the
+Left / Right arrow keys move the selected servo (1 / 2 selects it) while the
+grab distance, front distance and magnet readings are shown next to it, and
+positions can be saved and copied as config lines (see ServoPage).
 
 Command line options set the starting values, e.g. only the pin monitor and IR:
     python tools/sensor_viewer.py --line "" --crash "" --connect
     python tools/sensor_viewer.py --tab tof --connect
     python tools/sensor_viewer.py --tab mag --connect --record log.txt
+    python tools/sensor_viewer.py --tab servo --connect
 """
 
 import argparse
 import json
+import math
 import os
 import queue
 import sys
@@ -109,12 +115,27 @@ class Link:
     def start_stream(self, args):
         self.ser.write(b"\r\x03\x03")          # Ctrl-C twice: stop whatever is running
         time.sleep(0.3)
-        self.ser.write(b"\x04")                # Ctrl-D: soft reset, so freshly uploaded files are used
-        time.sleep(1.2)
-        self.ser.write(b"\x03\x03")            # stop main.py, which the soft reset starts again
+        # CHANGED (2026-10-23): no more Ctrl-D soft reset here. A soft reset
+        # runs main.py, and stopping it with Ctrl-C ran its `finally`, which
+        # sent the servos to 0 degrees - outside their safe range. Instead the
+        # robot code's modules are forgotten, so freshly uploaded files are
+        # still used by the import below.
+        purge = ("import sys\r"
+                 "for _m in [k for k in sys.modules if k.split('.')[0] in "
+                 "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]: del sys.modules[_m]\r"
+                 "\r")
+        self.ser.write(purge.encode())
         time.sleep(0.3)
         cmd = "from tests.stream_sensors import stream; stream(%s)\r" % args
         self.ser.write(cmd.encode())
+
+    def send(self, text):
+        """ADDED (2026-10-23): type one command line to the running stream,
+        e.g. "servo1 135" (see tests/stream_sensors.py)."""
+        try:
+            self.ser.write((text + "\n").encode())
+        except (serial.SerialException, OSError):
+            pass
 
     def stop_stream(self):
         try:
@@ -575,6 +596,432 @@ class MagPage(tk.Frame):
         c.create_text(left + 40, top - 14, text="sensor output", anchor="w", font=FONT)
 
 
+class ServoPage(tk.Frame):
+    """ADDED (2026-10-23): gripper calibration tab.
+
+    Move the gripper servos with the keyboard while watching the grab distance
+    sensor, the front distance sensor and the magnet sensor:
+        Left / Right         selected servo -/+ one step
+        Shift + Left / Right five steps at once
+        1 / 2                select servo1 / servo2 (or click its card)
+        x                    selected servo limp (no pulses)
+        r                    safe reset (config.SERVO_RESET: servo2 220 -> 250
+                             slowly, servo1 to the middle of its safe range).
+                             A limp servo always starts with this reset: the
+                             first arrow key press on it sends the reset.
+                             No angle outside config.SERVO_SAFE_RANGE is ever
+                             sent. (ADDED 2026-10-23)
+        Enter                LOCK the selected servo at its angle (grab
+                             confirmed): it keeps holding, and the keys,
+                             "go to", "limp" and "Move there" cannot move it.
+                             The angle is saved as position "grab". Enter
+                             again unlocks. (ADDED 2026-10-23)
+    The keys only work while this tab is shown and no text field has the
+    cursor. "Save position" remembers the current angles (e.g. "open",
+    "closed", "lifted"); "Copy as config" puts them on the clipboard as a
+    Python dict for config.py.
+    """
+
+    STEPS = (1, 2, 5, 10)
+
+    def __init__(self, parent, send, log):
+        tk.Frame.__init__(self, parent, bg=BG, padx=8, pady=6, takefocus=1)
+        self.send = send       # send(text) -> True if the command went to the Pico
+        self.log = log         # log(text, tag) writes to the viewer's message box
+        self.names = []        # servo names the Pico reported, e.g. ["servo1", "servo2"]
+        self.pins = {}         # name -> GP number
+        self.safe = {}         # name -> (low, high) safe range reported by the Pico
+        self.reset_paths = {}  # name -> (start, end) of its reset, or None (middle of the safe range)
+        self.resetting = {}    # name -> time a reset was sent; its keys wait until the Pico reports an angle
+        self.target = {}       # name -> angle the arrow keys step from (degrees)
+        self.reported = {}     # name -> last angle the Pico reports (None = limp)
+        self.limits = {}       # name -> (min StringVar, max StringVar)
+        self.cards = {}        # name -> (frame, canvas, big label, info label)
+        self.selected = None
+        self.locked = {}       # name -> angle it is locked at (Enter key, grab confirmed)
+        self.saved = []        # [(label, {name: angle}, grab mm)]
+        self.grab_mm = None
+        self._build()
+
+    # ------------------------------------------------------------ layout
+    def _build(self):
+        self.help = tk.Label(self, bg=BG, font=FONT, justify="left", anchor="w", text=(
+            "Keys:  Left / Right = selected servo -/+ step     Shift + Left / Right = 5 steps     "
+            "1 / 2 = select servo     x = limp     r = safe reset     Enter = LOCK / unlock the grab angle\n"
+            "The servos are limp until the first key press, which moves the servo to the middle of its "
+            "safe range (config.SERVO_SAFE_RANGE; no angle outside it is ever sent).\n"
+            "After typing in a field, press Enter or click a servo card to get the keys back."))
+        self.help.pack(fill="x", pady=(0, 4))
+
+        steps = tk.Frame(self, bg=BG)
+        steps.pack(fill="x")
+        tk.Label(steps, text="Step:", bg=BG, font=FONT_BOLD).pack(side="left")
+        self.step_var = tk.IntVar(value=2)
+        for s in self.STEPS:
+            ttk.Radiobutton(steps, text="%d deg" % s, value=s, variable=self.step_var,
+                            takefocus=0).pack(side="left", padx=4)
+
+        middle = tk.Frame(self, bg=BG)
+        middle.pack(fill="both", expand=True, pady=4)
+        self.cards_frame = tk.Frame(middle, bg=BG)
+        self.cards_frame.pack(side="left", fill="y")
+        self.no_servo = tk.Label(self.cards_frame, bg=BG, fg="#777", font=FONT,
+                                 text="Not streaming yet. Connect first.")
+        self.no_servo.pack(padx=10, pady=20)
+
+        # live sensor readings next to the servos
+        side = tk.LabelFrame(middle, text="Sensors for aiming", bg=BG, font=FONT_BOLD, padx=10, pady=6)
+        side.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        tk.Label(side, text="grab distance (%s)" % config.GRAB_TOF, bg=BG, font=FONT).pack(anchor="w")
+        self.grab_label = tk.Label(side, text="-", bg=BG, font=("Segoe UI", 28, "bold"))
+        self.grab_label.pack(anchor="w")
+        self.grab_state = tk.Label(side, text="", bg=BG, font=FONT_BOLD)
+        self.grab_state.pack(anchor="w")
+        tk.Label(side, text="config: box seen < %d mm, in reach <= %d mm" % (
+            config.GRAB_SEE_MM, config.GRAB_REACH_MM), bg=BG, fg="#666", font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Label(side, text="front distance (%s)" % config.FRONT_TOF, bg=BG, font=FONT).pack(anchor="w", pady=(10, 0))
+        self.front_label = tk.Label(side, text="-", bg=BG, font=FONT_BIG)
+        self.front_label.pack(anchor="w")
+        tk.Label(side, text="magnet", bg=BG, font=FONT).pack(anchor="w", pady=(10, 0))
+        self.mag_label = tk.Label(side, text="-", bg=BG, font=FONT_BIG)
+        self.mag_label.pack(anchor="w")
+
+        # saved positions
+        saved = tk.LabelFrame(self, text="Saved positions (double-click = move there)", bg=BG,
+                              font=FONT_BOLD, padx=8, pady=4)
+        saved.pack(fill="x", pady=(4, 0))
+        row = tk.Frame(saved, bg=BG)
+        row.pack(fill="x")
+        tk.Label(row, text="name", bg=BG, font=FONT).pack(side="left")
+        self.label_var = tk.StringVar(value="open")
+        entry = ttk.Entry(row, textvariable=self.label_var, width=14)
+        entry.pack(side="left", padx=4)
+        entry.bind("<Return>", lambda e: (self.save_position(), self.focus_set()))
+        ttk.Button(row, text="Save position", command=self.save_position).pack(side="left", padx=4)
+        ttk.Button(row, text="Move there", command=self.go_saved).pack(side="left", padx=4)
+        ttk.Button(row, text="Delete", command=self.delete_saved).pack(side="left", padx=4)
+        ttk.Button(row, text="Copy as config", command=self.copy_config).pack(side="left", padx=4)
+        self.listbox = tk.Listbox(saved, height=5, font=MONO, activestyle="none")
+        self.listbox.pack(fill="x", pady=4)
+        self.listbox.bind("<Double-Button-1>", lambda e: self.go_saved())
+
+    def _card(self, name):
+        """One servo: a dial (black needle = angle on the Pico, amber = target,
+        blue arc = allowed range), the angle, limits and buttons."""
+        frame = tk.LabelFrame(self.cards_frame, text="%s  (GP%s)" % (name, self.pins.get(name, "?")),
+                              bg=BG, font=FONT_BOLD, padx=6, pady=4, highlightthickness=3,
+                              highlightbackground=BG, highlightcolor=BG)
+        canvas = tk.Canvas(frame, width=230, height=150, bg=BG, highlightthickness=0)
+        canvas.grid(row=0, column=0, rowspan=4)
+        big = tk.Label(frame, text="limp", bg=BG, font=("Segoe UI", 22, "bold"), width=7)
+        big.grid(row=0, column=1, columnspan=3)
+        info = tk.Label(frame, text="", bg=BG, fg="#555", font=("Segoe UI", 8))
+        info.grid(row=1, column=1, columnspan=3)
+        safe_lo, safe_hi = self.safe.get(name, (0, 270))
+        lo, hi = tk.StringVar(value=str(safe_lo)), tk.StringVar(value=str(safe_hi))
+        tk.Label(frame, text="limits", bg=BG, font=FONT).grid(row=2, column=1, sticky="e")
+        for column, var in ((2, lo), (3, hi)):
+            limit_entry = ttk.Entry(frame, textvariable=var, width=5)
+            limit_entry.grid(row=2, column=column)
+            # Enter: back to the arrow keys (the dial redraws as you type)
+            limit_entry.bind("<Return>", lambda e: self.focus_set())
+            var.trace_add("write", lambda *args: self.draw(name))
+        goto = tk.StringVar(value=str(self.middle(name)))
+        go_entry = ttk.Entry(frame, textvariable=goto, width=5)
+        go_entry.grid(row=3, column=2)
+        go_entry.bind("<Return>", lambda e: (self.go_to(name, goto.get()), self.focus_set()))
+        ttk.Button(frame, text="go to", width=6, takefocus=0,
+                   command=lambda: self.go_to(name, goto.get())).grid(row=3, column=1)
+        ttk.Button(frame, text="limp", width=6, takefocus=0,
+                   command=lambda: self.limp(name)).grid(row=3, column=3)
+        # ADDED (2026-10-23): the safe reset (see reset())
+        ttk.Button(frame, text="reset", width=6, takefocus=0,
+                   command=lambda: self.busy(name) or self.reset(name)).grid(row=4, column=1)
+        for w in (frame, canvas, big, info):
+            w.bind("<Button-1>", lambda e: self.select(name))
+        frame.pack(fill="x", pady=4)
+        self.limits[name] = (lo, hi)
+        self.cards[name] = (frame, canvas, big, info)
+
+    # ------------------------------------------------------------ actions
+    def select(self, name):
+        if name not in self.cards:
+            return
+        self.selected = name
+        for n, (frame, _, _, _) in self.cards.items():
+            colour = "#1f6fb2" if n == name else BG
+            frame.config(highlightbackground=colour, highlightcolor=colour)
+        self.focus_set()          # so the arrow keys do not go to a text field
+
+    def middle(self, name):
+        """ADDED (2026-10-23): middle of the servo's safe range; the first key
+        press moves from here."""
+        lo, hi = self.safe.get(name, (0, 270))
+        return (lo + hi) // 2
+
+    def limit_range(self, name):
+        """(min, max) typed in the card, kept inside the servo's safe range
+        (CHANGED 2026-10-23: was 0 .. 270)."""
+        safe_lo, safe_hi = self.safe.get(name, (0, 270))
+        lo_var, hi_var = self.limits[name]
+        try:
+            lo = max(safe_lo, min(safe_hi, int(float(lo_var.get()))))
+            hi = max(safe_lo, min(safe_hi, int(float(hi_var.get()))))
+        except ValueError:
+            return safe_lo, safe_hi
+        return (lo, hi) if lo <= hi else (hi, lo)
+
+    def is_locked(self, name):
+        """True (and a message) if `name` is locked, so it must not move."""
+        if name in self.locked:
+            self.log("%s is LOCKED at %d deg - press Enter to unlock it first" % (name, self.locked[name]), "err")
+            return True
+        return False
+
+    def toggle_lock(self, name):
+        """ADDED (2026-10-23): Enter key. Lock the servo at its present angle
+        once the grab is right (it keeps the angle; nothing here can move it),
+        or unlock it again."""
+        if name in self.locked:
+            del self.locked[name]
+            self.log("%s unlocked" % name)
+        else:
+            if self.reported.get(name) is None:
+                self.log("%s is limp: move it to the grab angle first, then press Enter" % name, "err")
+                return
+            # the last angle sent (the Pico's report can be one sample behind)
+            angle = self.target.get(name, self.reported[name])
+            self.locked[name] = angle
+            self.log("%s LOCKED at %d deg (grab angle, saved as 'grab'). Enter again unlocks." % (name, angle), "ev")
+            self.save_position(label="grab")
+        self.draw(name)
+
+    def reset(self, name):
+        """ADDED (2026-10-23): ask the Pico for the servo's safe reset
+        (config.SERVO_RESET: servo2 220 -> 250 slowly; servo1 straight to the
+        middle of its safe range). A limp servo can only be started this way.
+        Keys for this servo wait until the Pico reports its angle again."""
+        if self.is_locked(name):
+            return
+        if not self.send("%s reset" % name):
+            self.log("not connected: servo command not sent", "err")
+            return
+        path = self.reset_paths.get(name)
+        if path is None:
+            self.target[name] = self.middle(name)
+            self.log("%s reset: straight to %d deg (middle of its safe range)" % (name, self.target[name]), "ev")
+        else:
+            self.target[name] = path[1]
+            self.log("%s reset: %d -> %d deg, slowly (about 1.6 s)" % (name, path[0], path[1]), "ev")
+        self.resetting[name] = time.time()
+        self.draw(name)
+
+    def busy(self, name):
+        """ADDED (2026-10-23): True while a reset sent for `name` is still
+        running on the Pico (no angle reported yet, at most 4 s)."""
+        sent = self.resetting.get(name)
+        if sent is None:
+            return False
+        if self.reported.get(name) is not None or time.time() - sent > 4.0:
+            del self.resetting[name]
+            return False
+        return True
+
+    def move(self, name, angle):
+        if self.is_locked(name) or self.busy(name):
+            return
+        # ADDED (2026-10-23): a limp servo is started with its safe reset,
+        # never with a jump to an angle (its real position is unknown).
+        if self.reported.get(name) is None:
+            self.reset(name)
+            return
+        lo, hi = self.limit_range(name)
+        angle = max(lo, min(hi, int(round(angle))))
+        self.target[name] = angle
+        if not self.send("%s %d" % (name, angle)):
+            self.log("not connected: servo command not sent", "err")
+        self.draw(name)
+
+    def go_to(self, name, text):
+        try:
+            angle = float(text)
+        except ValueError:
+            self.log("'go to' needs a number of degrees", "err")
+            return
+        self.select(name)
+        self.move(name, angle)
+
+    def limp(self, name):
+        if self.is_locked(name):      # limp would drop the box
+            return
+        self.send("%s off" % name)
+
+    def key(self, keysym, shift):
+        """A key pressed while this tab is shown (see Viewer.on_servo_key)."""
+        if keysym in ("1", "2"):
+            index = int(keysym) - 1
+            if index < len(self.names):
+                self.select(self.names[index])
+            return
+        if self.selected is None:
+            return
+        if keysym in ("Return", "KP_Enter"):
+            self.toggle_lock(self.selected)
+            return
+        if keysym in ("x", "X"):
+            self.limp(self.selected)
+            return
+        if keysym in ("r", "R"):                 # ADDED (2026-10-23)
+            if not self.busy(self.selected):
+                self.reset(self.selected)
+            return
+        sign = -1 if keysym == "Left" else 1
+        step = self.step_var.get() * (5 if shift else 1)
+        start = self.target.get(self.selected, self.middle(self.selected))
+        self.move(self.selected, start + sign * step)
+
+    def save_position(self, label=None):
+        if not self.names:
+            return
+        if label is None:
+            label = self.label_var.get().strip() or "position %d" % (len(self.saved) + 1)
+        angles = dict((n, self.reported.get(n)) for n in self.names)
+        angles.update(self.locked)     # a locked servo: the angle it is locked at
+        self.saved.append((label, angles, self.grab_mm))
+        text = "%-12s " % label + "  ".join(
+            "%s %s" % (n, "limp" if a is None else "%d deg" % a) for n, a in sorted(angles.items()))
+        text += "   grab %s" % ("-" if self.grab_mm is None else "%d mm" % self.grab_mm)
+        self.listbox.insert("end", text)
+
+    def _picked(self):
+        picked = self.listbox.curselection()
+        return picked[0] if picked else None
+
+    def go_saved(self):
+        i = self._picked()
+        if i is None:
+            return
+        for name, angle in self.saved[i][1].items():
+            if angle is not None and name in self.cards:
+                self.move(name, angle)
+
+    def delete_saved(self):
+        i = self._picked()
+        if i is not None:
+            del self.saved[i]
+            self.listbox.delete(i)
+
+    def copy_config(self):
+        if not self.saved:
+            self.log("nothing saved yet", "err")
+            return
+        lines = ["# Gripper servo angles (degrees), measured with tools/sensor_viewer.py (Grab / Servo tab)",
+                 "GRIPPER_ANGLES = {"]
+        for label, angles, grab in self.saved:
+            body = ", ".join('"%s": %s' % (n, a) for n, a in sorted(angles.items()))
+            note = "" if grab is None else "    # grab distance %d mm" % grab
+            lines.append('    "%s": {%s},%s' % (label, body, note))
+        lines.append("}")
+        text = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.log("copied to the clipboard:\n" + text)
+
+    # ------------------------------------------------------------ data in
+    def on_hello(self, h):
+        servos = h.get("servo")
+        if servos is None:
+            servos = []
+            self.log("The Pico did not report any servos: upload the new tests/stream_sensors.py", "err")
+        names = [row[0] for row in servos]
+        self.pins = dict((row[0], row[1]) for row in servos)
+        # CHANGED (2026-10-23): each row also carries the servo's safe range
+        # (config.SERVO_SAFE_RANGE); the limits in the card can only narrow it.
+        self.safe = dict((row[0], (row[2], row[3]) if len(row) >= 4 else (0, 270)) for row in servos)
+        # ADDED (2026-10-23): reset path (config.SERVO_RESET) or None per servo
+        self.reset_paths = dict((row[0], row[4] if len(row) >= 5 else None) for row in servos)
+        self.resetting = {}
+        self.reported = dict((n, None) for n in names)   # a new stream starts with limp servos
+        if self.locked:
+            # the restarted stream has let every servo go limp: a lock means nothing now
+            self.log("stream restarted: the servos are limp, locks cleared", "err")
+            self.locked = {}
+        if names != self.names:
+            for frame, _, _, _ in self.cards.values():
+                frame.destroy()
+            self.cards = {}
+            self.limits = {}
+            self.names = names
+            for n in names:
+                self._card(n)
+            if names:
+                self.no_servo.pack_forget()
+                self.select(names[0])
+            else:
+                self.no_servo.config(text="No servos on the Pico.")
+                self.no_servo.pack(padx=10, pady=20)
+        for n in names:
+            self.draw(n)
+
+    def on_sample(self, m):
+        for name, angle in m.get("servo", []):
+            if self.reported.get(name, "?") != angle:
+                self.reported[name] = angle
+                self.draw(name)
+        for row in m.get("tof", []):
+            name, available, mm = row[:3]
+            text = "n/a" if not available else ("no target" if mm is None else "%d mm" % mm)
+            if name == config.GRAB_TOF:
+                self.grab_mm = mm if available else None
+                self.grab_label.config(text=text)
+                if self.grab_mm is None:
+                    self.grab_state.config(text="", fg="black")
+                elif self.grab_mm <= config.GRAB_REACH_MM:
+                    self.grab_state.config(text="IN REACH", fg="#1e8449")
+                elif self.grab_mm < config.GRAB_SEE_MM:
+                    self.grab_state.config(text="box seen", fg=AMBER)
+                else:
+                    self.grab_state.config(text="nothing close", fg="#777")
+            elif name == config.FRONT_TOF:
+                self.front_label.config(text=text)
+        mag = m.get("mag")
+        if mag:
+            field, polarity = mag[2], mag[3]
+            self.mag_label.config(text="%s mV  %s" % (field, polarity or ""))
+
+    def draw(self, name):
+        if name not in self.cards:
+            return
+        _, canvas, big, info = self.cards[name]
+        lo, hi = self.limit_range(name)
+        angle = self.reported.get(name)
+        target = self.target.get(name)
+        big.config(text="limp" if angle is None else "%d deg" % angle, fg="#777" if angle is None else "black")
+        info.config(text="target %s   limits %d-%d" % ("-" if target is None else "%d" % target, lo, hi))
+        if name in self.locked:
+            big.config(text="%d LOCKED" % self.locked[name], fg=RED)
+            info.config(text="grab angle locked - Enter unlocks")
+        # The dial: 0 deg at the bottom left, 135 at the top, 270 at the bottom
+        # right. Screen angle (counter-clockwise from 3 o'clock) = 225 - servo angle.
+        canvas.delete("all")
+        cx, cy, r = 115, 85, 62
+        box = (cx - r, cy - r, cx + r, cy + r)
+        canvas.create_arc(box, start=-45, extent=270, style="arc", width=10, outline="#dddddd")
+        canvas.create_arc(box, start=225 - hi, extent=hi - lo, style="arc", width=10, outline="#9ec9ec")
+        for a in (0, 90, 180, 270):
+            t = math.radians(225 - a)
+            canvas.create_text(cx + (r + 16) * math.cos(t), cy - (r + 16) * math.sin(t), text=str(a),
+                               font=("Segoe UI", 8), fill="#666")
+        needle = RED if name in self.locked else "black"
+        for value, colour, width in ((target, AMBER, 2), (angle, needle, 4)):
+            if value is None:
+                continue
+            t = math.radians(225 - value)
+            canvas.create_line(cx, cy, cx + (r - 6) * math.cos(t), cy - (r - 6) * math.sin(t),
+                               fill=colour, width=width, capstyle="round")
+        canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill="black", outline="")
+
+
 class Viewer(tk.Tk):
     def __init__(self, options=None):
         tk.Tk.__init__(self)
@@ -614,6 +1061,8 @@ class Viewer(tk.Tk):
                 self.notebook.select(self.tof_page)
             elif options.tab == "mag":
                 self.notebook.select(self.mag_page)
+            elif options.tab == "servo":                 # ADDED (2026-10-23)
+                self.notebook.select(self.servo_page)
             if options.connect:
                 self.after(300, self.toggle_connect)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -662,6 +1111,18 @@ class Viewer(tk.Tk):
         self.notebook.add(self.tof_page, text="  Distance (ToF)  ")
         self.mag_page = MagPage(self.notebook)
         self.notebook.add(self.mag_page, text="  Magnetic  ")
+        # ADDED (2026-10-23): gripper calibration tab (servos on the arrow keys).
+        self.servo_page = ServoPage(self.notebook, self.send_command, self.write_log)
+        self.notebook.add(self.servo_page, text="  Grab / Servo  ")
+        # The keys are bound on the window AND on the notebook: when the notebook
+        # (the row of tabs) has the keyboard focus, its own Left / Right binding
+        # would switch tabs; the notebook binding runs first and stops that while
+        # the servo tab is shown.
+        for key in ("<Left>", "<Right>", "<Shift-Left>", "<Shift-Right>", "<Key-1>", "<Key-2>", "<Key-x>", "<Key-r>",
+                    "<Return>", "<KP_Enter>"):
+            self.bind(key, self.on_servo_key)
+            self.notebook.bind(key, self.on_servo_key)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(2, weight=1)
@@ -707,11 +1168,15 @@ class Viewer(tk.Tk):
         lower.columnconfigure(2, weight=1)
         lower.rowconfigure(0, weight=1)
 
-        crash = self._box(lower, "Crash (SEN0138)")
+        crash = self._box(lower, "Crash (SEN0138) + push button")
         crash.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=4)
         self.crash_lamps = [Lamp(crash, "left", 36), Lamp(crash, "right", 36)]
         for lamp in self.crash_lamps:
             lamp.frame.pack(side="left", padx=10)
+        # ADDED (2026-10-23): the push button (config.PUSH_BUTTON_PIN). It is read
+        # by the pin monitor (internal pull-up, pressed = LOW).
+        self.push_lamp = Lamp(crash, "push", 36)
+        self.push_lamp.frame.pack(side="left", padx=10)
 
         ir = self._box(lower, "IR receiver (TSOP4838)")
         ir.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
@@ -793,6 +1258,31 @@ class Viewer(tk.Tk):
         self.connect_btn.config(text="Connect")
         self.status.config(text="not connected", fg="#555")
 
+    def send_command(self, text):
+        """ADDED (2026-10-23): send a command line to the Pico's stream (servo
+        commands). Returns False when not connected."""
+        if self.link is None:
+            return False
+        self.link.send(text)
+        return True
+
+    def on_servo_key(self, event):
+        """ADDED (2026-10-23): arrow / 1 / 2 / x keys for the Grab / Servo tab.
+        Ignored on the other tabs and while a text field has the cursor."""
+        if self.notebook.select() != str(self.servo_page):
+            return None
+        focus = self.focus_get()
+        if focus is not None and focus.winfo_class() in ("Entry", "TEntry", "TCombobox", "Spinbox"):
+            return None
+        self.servo_page.key(event.keysym, bool(event.state & 0x1))   # 0x1 = Shift held
+        return "break"
+
+    def on_tab_changed(self, event):
+        # ADDED (2026-10-23): give the servo tab the keyboard focus when it is
+        # opened, so the arrow keys go to the servos and not to a text field.
+        if self.notebook.select() == str(self.servo_page):
+            self.after(20, self.servo_page.focus_set)
+
     def on_close(self):
         self.disconnect()
         if self.record is not None:
@@ -862,6 +1352,7 @@ class Viewer(tk.Tk):
         self.max_mm = h.get("max_mm", self.max_mm)
         self.tof_page.on_hello(h)
         self.mag_page.on_hello(h)
+        self.servo_page.on_hello(h)     # ADDED (2026-10-23)
         # pin monitor lamps
         for lamp in self.pin_lamps:
             lamp.frame.destroy()
@@ -876,6 +1367,7 @@ class Viewer(tk.Tk):
             roles[h["ir"]] = "IR"
         if h.get("mag"):
             roles[h["mag"][0]] = "magnet"
+        roles.setdefault(config.PUSH_BUTTON_PIN, "push btn")   # ADDED (2026-10-23)
         self.pin_lamps = []
         for i, gp in enumerate(self.monitor):
             caption = "GP%d\npin %s\n%s" % (gp, phys[i], self.role(roles, gp))
@@ -939,6 +1431,16 @@ class Viewer(tk.Tk):
             self.tof_page.on_sample(m["tof"])
         if "mag" in m:
             self.mag_page.on_sample(m["mag"])
+        self.servo_page.on_sample(m)     # ADDED (2026-10-23)
+        # ADDED (2026-10-23): push button lamp, from the pin monitor's level of
+        # PUSH_BUTTON_PIN (pull-up: released = HIGH, pressed = LOW).
+        levels = m.get("p", [])
+        if config.PUSH_BUTTON_PIN in self.monitor and self.monitor.index(config.PUSH_BUTTON_PIN) < len(levels):
+            pushed = levels[self.monitor.index(config.PUSH_BUTTON_PIN)] == 0
+            self.push_lamp.set(RED if pushed else ON, "push GP%d\n%s" % (
+                config.PUSH_BUTTON_PIN, "PRESSED" if pushed else "released"))
+        else:
+            self.push_lamp.set(GREY, "push\nnot monitored")
         for row in m.get("tof", []):
             name, available, mm, raw, status, errors = row[:6]
             row = self.tof_rows.get(name)
@@ -984,7 +1486,8 @@ def main():
     parser.add_argument("--no-tof", action="store_true", help="do not start the ToF sensors")
     parser.add_argument("--connect", action="store_true", help="connect immediately")
     parser.add_argument("--mag", help='magnetic sensor GP (an ADC pin shows the voltage); "" = off')
-    parser.add_argument("--tab", choices=("overview", "tof", "mag"), default="overview", help="tab shown first")
+    parser.add_argument("--tab", choices=("overview", "tof", "mag", "servo"), default="overview",
+                        help="tab shown first (servo = Grab / Servo calibration, added 2026-10-23)")
     parser.add_argument("--record", help="append every line received from the Pico to this file")
     Viewer(parser.parse_args()).mainloop()
 

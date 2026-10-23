@@ -125,7 +125,10 @@ def make_world(track, spec, pose, t_end, stop_on_collision=True):
         "right_dir": config.MOTOR_RIGHT_DIR_PIN, "right_pwm": config.MOTOR_RIGHT_PWM_PIN,
         "forward_level": 0,
         "left_invert": config.MOTOR_LEFT_INVERT, "right_invert": config.MOTOR_RIGHT_INVERT,
-        "crash": {config.CRASH_LEFT_PIN: released, config.CRASH_RIGHT_PIN: released},
+        # CHANGED (2026-10-23): the push button (PUSH_BUTTON_PIN) is a simulated
+        # button too, wired the same way as the crash sensors.
+        "crash": {config.CRASH_LEFT_PIN: released, config.CRASH_RIGHT_PIN: released,
+                  config.PUSH_BUTTON_PIN: released},
     }
     return World(track, spec, pins, pose, t_end, stop_on_collision=stop_on_collision)
 
@@ -170,7 +173,9 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
                            boxes=[sim_name(b) for b in boxes], ir_pin=config.IR_RX_PIN, light=light,
                            ir_when="red" if config.TRAFFIC_RED_WHEN_IR else "green")
 
-    button_pin = config.CRASH_LEFT_PIN if config.START_STOP_SENSOR == "left" else config.CRASH_RIGHT_PIN
+    # CHANGED (2026-10-23): START_STOP_SENSOR = "push" presses the push button.
+    button_pin = {"left": config.CRASH_LEFT_PIN, "right": config.CRASH_RIGHT_PIN,
+                  "push": config.PUSH_BUTTON_PIN}[config.START_STOP_SENSOR]
     for t in presses:
         world.press(button_pin, t, hold_ms=(press_hold or {}).get(t, 80))
 

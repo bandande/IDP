@@ -100,8 +100,15 @@ CRASH_LEFT_PIN = 9             # GP9 = physical 12  (Crash Sensor L DIG/S)
 CRASH_RIGHT_PIN = 8            # GP8 = physical 11  (Crash Sensor R DIG/S)
 CRASH_ACTIVE_LOW = True        # pressed -> 0V
 CRASH_DEBOUNCE_MS = 15
+
+# ---------------------------------------------------------------------------
+# ADOPTED (2026-10-23) from the partner's main (91d3af5): a separate push
+# button on the free pin GP12. Wired like the crash sensors: pressed -> 0V
+# (the Pico's internal pull-up holds it HIGH when released). It is the start /
+# stop button only when START_STOP_SENSOR = "push" (below).
 # ---------------------------------------------------------------------------
 PUSH_BUTTON_PIN = 12           # GP12 = physical 16 (Push Button DIG/S)
+
 # ---------------------------------------------------------------------------
 # IR receiver: 1 x Vishay TSOP4838 (38 kHz demodulator; output LOW while an IR
 # burst is being received). Pins: 1 = OUT, 2 = GND, 3 = VS.
@@ -163,8 +170,8 @@ TRAFFIC_IR_CONFIRM_MS = 200    # IR = green: IR must be seen without a break thi
 TRAFFIC_GREEN_AFTER_MS = 1500  # IR = red only: no IR for this long = green (longer than the beacon's off phase)
 TRAFFIC_WAIT_MAX_MS = 0        # give up waiting and go after this long (0 = wait forever)
 
-# Not used in the final schematic: GP12 (physical 16; the department examples
-# put a start button there), plus GP0-GP3 if motor driver 1 is not used.
+# Not used in the final schematic: GP0-GP3 if motor driver 1 is not used.
+# (CHANGED 2026-10-23: GP12 is now the push button, see PUSH_BUTTON_PIN.)
 # The on-board LED is not a header pin: use Pin("LED") (GP25 on Pico 2).
 
 # ---------------------------------------------------------------------------
@@ -184,12 +191,41 @@ MOTOR_MIN_DUTY = 0             # % where the wheels just start to turn (tests/te
 
 # Gripper servos (actuators/servo.py; schematic ServoPin1 / ServoPin2).
 SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physical 17
+# ADDED (2026-10-23): safe angle range (degrees, (lowest, highest)) of each
+# gripper servo, measured on the robot. Outside it the gripper runs into its
+# mechanical end stop: the servo stalls, draws a large current and can pull
+# the supply down so far that the Pico resets (this happened on the bench).
+# actuators/servo.py clamps every angle into this range. None = not measured
+# yet: the sensor viewer / stream then refuse to move that servo at all.
+# CHANGED (2026-10-23): servo2 is now 220 - 270. 220 is its GRAB angle
+# (SERVO_GRAB_ANGLE below) and it must never go lower than that. Angles above
+# 270 need pulses longer than the servo's maximum of 2.5 ms (300 deg = 2.72 ms;
+# at 300 servo2 ran away and kept turning faster), so 270 is also a hard
+# limit in actuators/servo.py, whatever is written here.
+SERVO_SAFE_RANGE = {"servo1": (170, 195), "servo2": (220, 270)}
+# ADDED (2026-10-23): the angle at which the gripper holds a box (measured
+# with the sensor viewer's Grab / Servo tab). servo2 never goes below it.
+SERVO_GRAB_ANGLE = {"servo2": 220}   # CHANGED (2026-10-23): was 222
+# ADDED (2026-10-23): how a servo is RESET, i.e. brought to its start position
+# when it has had no pulses (after power-up, after a restart, after going
+# limp): (start, end) = go to `start`, wait SERVO_RESET_SETTLE_MS until it is
+# there, then turn slowly to `end`, one degree every SERVO_RESET_STEP_MS.
+# servo2 must always be reset this way, upwards towards 250: turning it the
+# other way can break the gripper. A servo not listed here is reset by going
+# straight to the middle of its safe range.
+# CHANGED (2026-10-23): servo2 reset now starts at 220 (was 200), its grab
+# angle and the low end of its safe range; the direction (up to 250) is
+# unchanged.
+SERVO_RESET = {"servo2": (220, 250)}
+SERVO_RESET_SETTLE_MS = 600
+SERVO_RESET_STEP_MS = 20
 
 # ---------------------------------------------------------------------------
 # Backup line follower (control/line_follower.py). Speeds are % of full PWM.
 # Start conservative and raise the speed once it follows reliably.
 # ---------------------------------------------------------------------------
-START_STOP_SENSOR = "left"     # crash sensor used as the start / stop button: "left" or "right"
+START_STOP_SENSOR = "left"     # start / stop button: "left" / "right" crash sensor, or "push" = the
+                               # push button on PUSH_BUTTON_PIN (CHANGED 2026-10-23: "push" added)
 START_DELAY_MS = 1000          # wait after the start press, so the hand is clear of the robot
 LOOP_PERIOD_MS = 5             # main loop period
 FOLLOW_BASE_SPEED = 35         # forward speed on a straight line
@@ -254,7 +290,7 @@ def validate():
     claim(LINE_OUTER_RIGHT_PIN, "line outer-right")
     claim(CRASH_LEFT_PIN, "crash left")
     claim(CRASH_RIGHT_PIN, "crash right")
-    claim(PUSH_BUTTON_PIN, "push button")
+    claim(PUSH_BUTTON_PIN, "push button")     # ADDED (2026-10-23)
     claim(IR_RX_PIN, "IR receiver")
     claim(MAG_PIN, "magnetic sensor")
     for colour, pin in LED_PINS.items():
@@ -263,8 +299,9 @@ def validate():
                       ("MOTOR_RIGHT_DIR_PIN", MOTOR_RIGHT_DIR_PIN), ("MOTOR_RIGHT_PWM_PIN", MOTOR_RIGHT_PWM_PIN)):
         if not BOARD_PINS.get(pin, "").startswith("motor"):
             problems.append("%s = GP%d is not a motor pin in BOARD_PINS" % (name, pin))
+    # CHANGED (2026-10-23): "push" (the push button) is allowed too.
     if START_STOP_SENSOR not in ("left", "right", "push"):
-        problems.append("START_STOP_SENSOR must be 'left', 'right', or 'push', not %r" % (START_STOP_SENSOR,))
+        problems.append("START_STOP_SENSOR must be 'left', 'right' or 'push', not %r" % (START_STOP_SENSOR,))
     if T_STEM_ACTION not in ("stop", "L", "R"):
         problems.append("T_STEM_ACTION must be 'stop', 'L' or 'R', not %r" % (T_STEM_ACTION,))
     if MAG_MODE not in ("digital", "analog"):
@@ -319,6 +356,21 @@ def validate():
             problems.append("MAG_POLE_LEVEL[%r] must be 'TOP' or 'BOTTOM'" % pole)
     if MAG_NO_POLE_LEVEL not in ("TOP", "BOTTOM"):
         problems.append("MAG_NO_POLE_LEVEL must be 'TOP' or 'BOTTOM'")
+    # ADDED (2026-10-23): every servo's safe range is (low, high) inside
+    # 0 .. 270 (270 = 2.5 ms pulse, the servo's maximum; beyond it the
+    # servo runs away)
+    for name in SERVO_PINS:
+        safe = SERVO_SAFE_RANGE.get(name)
+        if safe is not None and not (0 <= safe[0] < safe[1] <= 270):
+            problems.append("SERVO_SAFE_RANGE[%r] must be (low, high) with 0 <= low < high <= 270" % name)
+        # ADDED (2026-10-23): a reset path must stay inside the safe range
+        path = SERVO_RESET.get(name)
+        if path is not None and (safe is None or not (safe[0] <= path[0] <= safe[1] and safe[0] <= path[1] <= safe[1])):
+            problems.append("SERVO_RESET[%r] must start and end inside SERVO_SAFE_RANGE[%r]" % (name, name))
+        # ADDED (2026-10-23): the grab angle must be inside the safe range too
+        grab = SERVO_GRAB_ANGLE.get(name)
+        if grab is not None and (safe is None or not (safe[0] <= grab <= safe[1])):
+            problems.append("SERVO_GRAB_ANGLE[%r] must be inside SERVO_SAFE_RANGE[%r]" % (name, name))
     return problems
 
 
@@ -328,7 +380,8 @@ def sensor_pins():
         LINE_OUTER_LEFT_PIN: "line outer-left", LINE_INNER_LEFT_PIN: "line inner-left",
         LINE_INNER_RIGHT_PIN: "line inner-right", LINE_OUTER_RIGHT_PIN: "line outer-right",
         CRASH_LEFT_PIN: "crash left", CRASH_RIGHT_PIN: "crash right",
-        IR_RX_PIN: "IR receiver", MAG_PIN: "magnetic sensor", PUSH_BUTTON_PIN: "push button"
+        IR_RX_PIN: "IR receiver", MAG_PIN: "magnetic sensor",
+        PUSH_BUTTON_PIN: "push button",     # ADDED (2026-10-23)
     }
     for tof in TOF_SENSORS:
         pins[tof["sda"]] = "ToF %s SDA" % tof["name"]
