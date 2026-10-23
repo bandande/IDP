@@ -731,7 +731,6 @@ def robot_mode_check(robot, map, motor3, motor4, tasks, now, holdoff_until, skip
     
         elif robot.mode_extra_specific=="move_straight":
             # Make sure does not change off line
-            print("move_turning")
             if now>=time_count:
                 
                 robot.mode_extra_specific="move_turning"
