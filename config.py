@@ -100,7 +100,8 @@ CRASH_LEFT_PIN = 9             # GP9 = physical 12  (Crash Sensor L DIG/S)
 CRASH_RIGHT_PIN = 8            # GP8 = physical 11  (Crash Sensor R DIG/S)
 CRASH_ACTIVE_LOW = True        # pressed -> 0V
 CRASH_DEBOUNCE_MS = 15
-
+# ---------------------------------------------------------------------------
+PUSH_BUTTON_PIN = 12           # GP12 = physical 16 (Push Button DIG/S)
 # ---------------------------------------------------------------------------
 # IR receiver: 1 x Vishay TSOP4838 (38 kHz demodulator; output LOW while an IR
 # burst is being received). Pins: 1 = OUT, 2 = GND, 3 = VS.
@@ -188,7 +189,7 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # Backup line follower (control/line_follower.py). Speeds are % of full PWM.
 # Start conservative and raise the speed once it follows reliably.
 # ---------------------------------------------------------------------------
-START_STOP_SENSOR = "left"     # crash sensor used as the start / stop button: "left" or "right"
+START_STOP_SENSOR = "push"     # crash sensor used as the start / stop button: "left" or "right"
 START_DELAY_MS = 1000          # wait after the start press, so the hand is clear of the robot
 LOOP_PERIOD_MS = 5             # main loop period
 FOLLOW_BASE_SPEED = 35         # forward speed on a straight line
@@ -253,6 +254,7 @@ def validate():
     claim(LINE_OUTER_RIGHT_PIN, "line outer-right")
     claim(CRASH_LEFT_PIN, "crash left")
     claim(CRASH_RIGHT_PIN, "crash right")
+    claim(PUSH_BUTTON_PIN, "push button")
     claim(IR_RX_PIN, "IR receiver")
     claim(MAG_PIN, "magnetic sensor")
     for colour, pin in LED_PINS.items():
@@ -261,8 +263,8 @@ def validate():
                       ("MOTOR_RIGHT_DIR_PIN", MOTOR_RIGHT_DIR_PIN), ("MOTOR_RIGHT_PWM_PIN", MOTOR_RIGHT_PWM_PIN)):
         if not BOARD_PINS.get(pin, "").startswith("motor"):
             problems.append("%s = GP%d is not a motor pin in BOARD_PINS" % (name, pin))
-    if START_STOP_SENSOR not in ("left", "right"):
-        problems.append("START_STOP_SENSOR must be 'left' or 'right', not %r" % (START_STOP_SENSOR,))
+    if START_STOP_SENSOR not in ("left", "right", "push"):
+        problems.append("START_STOP_SENSOR must be 'left', 'right', or 'push', not %r" % (START_STOP_SENSOR,))
     if T_STEM_ACTION not in ("stop", "L", "R"):
         problems.append("T_STEM_ACTION must be 'stop', 'L' or 'R', not %r" % (T_STEM_ACTION,))
     if MAG_MODE not in ("digital", "analog"):
@@ -326,7 +328,7 @@ def sensor_pins():
         LINE_OUTER_LEFT_PIN: "line outer-left", LINE_INNER_LEFT_PIN: "line inner-left",
         LINE_INNER_RIGHT_PIN: "line inner-right", LINE_OUTER_RIGHT_PIN: "line outer-right",
         CRASH_LEFT_PIN: "crash left", CRASH_RIGHT_PIN: "crash right",
-        IR_RX_PIN: "IR receiver", MAG_PIN: "magnetic sensor",
+        IR_RX_PIN: "IR receiver", MAG_PIN: "magnetic sensor", PUSH_BUTTON_PIN: "push button"
     }
     for tof in TOF_SENSORS:
         pins[tof["sda"]] = "ToF %s SDA" % tof["name"]

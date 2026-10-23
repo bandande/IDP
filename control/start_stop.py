@@ -16,6 +16,14 @@ Usage
 from utime import ticks_ms
 
 from sensors.crash import CrashSensor
+from sensors.push_button import PushButton
+from config import PUSH_BUTTON_PIN
+from machine import Pin
+
+
+
+
+
 
 
 class StartStopButton:
@@ -25,9 +33,22 @@ class StartStopButton:
     @classmethod
     def from_config(cls):
         import config
-        pin = config.CRASH_LEFT_PIN if config.START_STOP_SENSOR == "left" else config.CRASH_RIGHT_PIN
-        return cls(CrashSensor(pin, config.CRASH_ACTIVE_LOW, config.CRASH_DEBOUNCE_MS,
+        if config.START_STOP_SENSOR == "left":
+            pin = config.CRASH_LEFT_PIN
+            return cls(CrashSensor(pin, config.CRASH_ACTIVE_LOW, config.CRASH_DEBOUNCE_MS,
                                name=config.START_STOP_SENSOR + " crash (start/stop)"))
+
+        elif config.START_STOP_SENSOR == "right":
+            pin = config.CRASH_RIGHT_PIN
+            return cls(CrashSensor(pin, config.CRASH_ACTIVE_LOW, config.CRASH_DEBOUNCE_MS,
+                               name=config.START_STOP_SENSOR + " crash (start/stop)"))
+
+        else:
+            pin = config.PUSH_BUTTON_PIN
+            return cls(PushButton(PUSH_BUTTON_PIN, config.CRASH_ACTIVE_LOW))
+        
+
+
 
     def pressed(self, now_ms=None):
         """Call every loop. True once for every new press."""
