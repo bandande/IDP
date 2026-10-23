@@ -107,7 +107,7 @@ def main():
     #start running
     while True:
 
-        f.button_check(button, is_started, robot, motor3, motor4)
+        is_started=f.button_check(button, is_started, robot, motor3, motor4)
         
         if is_started:
             
@@ -119,7 +119,8 @@ def main():
                 robot.box_count+=1
                 robot.queue=["go_back","deliver","collect"]
             
-            f.robot_mode_check(
+            
+            robot, map, motor3, motor4, tasks, now, holdoff_until, skip_forward, reversing, time_count, turning, drop_off_turn_count, at_start, picking_up, readings, scantime, movetime, servo1, servo2, dropping_off, left_old_line = f.robot_mode_check(
                 robot, 
                 map, 
                 motor3, 
@@ -139,7 +140,8 @@ def main():
                 movetime, 
                 servo1, 
                 servo2, 
-                dropping_off
+                dropping_off,
+                left_old_line
             )
             
             # Action
