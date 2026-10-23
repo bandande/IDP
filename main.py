@@ -119,8 +119,28 @@ def main():
                 robot.box_count+=1
                 robot.queue=["go_back","deliver","collect"]
             
-            f.robot_mode_check(robot, map, motor3, motor4, tasks, now, holdoff_until, skip_forward, reversing, time_count, turning, 
-                     drop_off_turn_count, at_start, picking_up, readings, scantime, movetime, servo1, servo2, dropping_off)
+            f.robot_mode_check(
+                robot, 
+                map, 
+                motor3, 
+                motor4, 
+                tasks, 
+                now, 
+                holdoff_until, 
+                skip_forward, 
+                reversing, 
+                time_count, 
+                turning, 
+                drop_off_turn_count, 
+                at_start, 
+                picking_up, 
+                readings, 
+                scantime, 
+                movetime, 
+                servo1, 
+                servo2, 
+                dropping_off
+            )
             
             # Action
             
