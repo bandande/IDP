@@ -189,7 +189,7 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # Backup line follower (control/line_follower.py). Speeds are % of full PWM.
 # Start conservative and raise the speed once it follows reliably.
 # ---------------------------------------------------------------------------
-START_STOP_SENSOR = "push"     # crash sensor used as the start / stop button: "left" or "right"
+START_STOP_SENSOR = "left"     # crash sensor used as the start / stop button: "left" or "right"
 START_DELAY_MS = 1000          # wait after the start press, so the hand is clear of the robot
 LOOP_PERIOD_MS = 5             # main loop period
 FOLLOW_BASE_SPEED = 35         # forward speed on a straight line

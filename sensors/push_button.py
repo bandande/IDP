@@ -23,6 +23,7 @@ class PushButton:
             self._pin = Pin(pin, Pin.IN, Pin.PULL_DOWN)
         self.held = False
         self.hit = 0
+        self.pending = 0
 
     def pressed(self):
         '''Debounced pressed state as of last update'''
@@ -34,6 +35,14 @@ class PushButton:
 
     def _add_hit(self):
         self.hit+=1
+        self.pending += 1
+
+    def consume_hit(self):
+        """True once for every new press since the previous call."""
+        if self._pending:
+            self._pending -= 1
+            return True
+        return False
 
     def update(self, now_ms=None):
         '''Call every main loop iteration, returns debounced pressed state'''
