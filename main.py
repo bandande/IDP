@@ -639,14 +639,22 @@ def main():
                         robot.mode=""
                     elif drop_off_turn_count==1:
                         # Use sensor to detect if box is there or not
-                        
-                        empty=True
-                        # If the space is empty
-                        if empty==True:
+                        for i in range(10):
+                            if tasks.grab_tof.poll():
+                                d = tasks.grab_tof.get_distance()
+                                if d is not None:
+                                    readings.append(d)
+                        read=readings[-10:]
+                        read.sort()
+                        mean_scan=read[5]
+                        print("DISTANCE MEASURED:"+str(mean_scan))
+                        if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
                             skip_forward=True
                             robot.queue+=["drop_off", ["turning", "about", 90]]
                             robot.mode=""
                         else:
+                            print("BOX THERE ALREADY")
+                            # If there already is a box
                             map[robot.final_objective]["type"]="FILLED"
                             robot.queue+=["deliver"]
                             robot.mode=""
@@ -660,6 +668,16 @@ def main():
                         robot.stop(motor3, motor4)
                         # Do the servo motions and moving, using sleep as well for moving forwards as 
                         # this needs to be hugely precise
+                        servo2.set_angle(20)
+                        
+                        robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
+                        utime.sleep_ms(20)
+                        servo1.set_angle(0)
+                        robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
+                        
+                        servo1.set_angle(0)
+                        servo2.set_angle(0)
+                        
                         # Drop off
                         print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
                         robot.box_count+=1
