@@ -7,6 +7,12 @@ import utime
 import config
 from control.task_sensors import TaskSensors
 import re
+import motor
+from actuators.servo import Servo
+import MAP
+import sensors.line_sensor as line_sensor
+from control.start_stop import StartStopButton
+
 
 def degrees_to_time(degrees):
     count=0
@@ -264,7 +270,7 @@ class Robot:
     
     def find_route(self, location):
         # Check that both locations exist
-        if self.position not in MAP or location not in MAP:
+        if self.position not in MAP.MAP or location not in MAP:
             return ["Error position and location not found"]
 
         # Queue of locations to explore
@@ -274,7 +280,7 @@ class Robot:
         # required positional arguments" on the Pico. len(MAP) is always
         # enough room: in this breadth-first search every location is added
         # to the queue at most once. (Works the same in CPython.)
-        queue = deque((), len(MAP))
+        queue = deque((), len(MAP.MAP))
         queue.append(self.position)
 
         # Remember how each location was reached
@@ -294,7 +300,7 @@ class Robot:
 
             # Explore all connected neighbours
             for direction in ("north", "south", "east", "west"):
-                neighbour = MAP[current].get(direction)
+                neighbour = MAP.MAP[current].get(direction)
 
                 if neighbour is None:
                     continue
@@ -311,7 +317,7 @@ class Robot:
     
     def move_to(self, location):
         # From one point to adjacent point
-        if MAP.get(self.position) and MAP.get(location):
+        if MAP.MAP.get(self.position) and MAP.MAP.get(location):
             # FIX (2026-10-15): dict views (.keys(), .values()) cannot be
             # indexed or searched with .index() - neither in CPython nor in
             # MicroPython - so the old one-liner
@@ -322,7 +328,7 @@ class Robot:
                 return []
             final_direction = None
             for direction in ("north", "east", "south", "west"):
-                if MAP[self.position].get(direction) == location:
+                if MAP.MAP[self.position].get(direction) == location:
                     final_direction = direction
                     break
             if final_direction is None:
@@ -380,17 +386,25 @@ def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c
             time_count=time_count-now
             #Then turn left
         
-def update_sensors(sensors, robot):
-    robot.left_sensor_previous=robot.left_sensor
-    robot.front_left_sensor_previous=robot.front_left_sensor
-    robot.front_right_sensor_previous=robot.front_right_sensor
-    robot.right_sensor_previous=robot.right_sensor
+def update_sensors(variables):
+
+    sensors = variables[18]
+    robot = variables[16]
+
+    variables[16].left_sensor_previous=robot.left_sensor
+    variables[16].front_left_sensor_previous=robot.front_left_sensor
+    variables[16].front_right_sensor_previous=robot.front_right_sensor
+    variables[16].right_sensor_previous=robot.right_sensor
     
     bits = sensors.read()
-    robot.left_sensor = 1 if bits & OUTER_LEFT else 0
-    robot.front_left_sensor = 1 if bits & INNER_LEFT else 0
-    robot.front_right_sensor = 1 if bits & INNER_RIGHT else 0
-    robot.right_sensor = 1 if bits & OUTER_RIGHT else 0
+    variables[16].left_sensor = 1 if bits & OUTER_LEFT else 0
+    variables[16].front_left_sensor = 1 if bits & INNER_LEFT else 0
+    variables[16].front_right_sensor = 1 if bits & INNER_RIGHT else 0
+    variables[16].right_sensor = 1 if bits & OUTER_RIGHT else 0
+
+    return variables
+
+
 
 
 def wait_for_start(button):
@@ -410,8 +424,15 @@ def wait_for_start(button):
     utime.sleep_ms(config.START_DELAY_MS)
 
 
-def button_check(button, is_started, robot, motor3, motor4):
+def button_check(variables):
     '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
+    
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time = variables
+    #retrieve variables            
+
+    
+    
+    
     pressed = button.pressed()
     if pressed:
 
@@ -484,12 +505,46 @@ def button_check(button, is_started, robot, motor3, motor4):
             is_started=True
             print("Started")
             pressed = False          # this press only started the robot
-    return is_started
+    
+    variables = (at_start,              #0
+                 button,                #1
+                 count,                 #2
+                 dropping_off,          #3
+                 drop_off_turn_count,   #4
+                 holdoff_until,         #5
+                 is_started,            #6
+                 left_old_line,         #7
+                 map,                   #8
+                 motor3,                #9
+                 motor4,                #10
+                 movetime,              #11
+                 moving,                #12
+                 picking_up,            #13
+                 readings,              #14
+                 reversing,             #15
+                 robot,                 #16
+                 scantime,              #17
+                 sensors,               #18
+                 servo1,                #19
+                 servo2,                #20
+                 skip_forward,          #21
+                 tasks,                 #22
+                 time_count,            #23
+                 traffic,               #24
+                 turning,               #25
+                 using_time             #26
+                 )
+    #condense and return new values of variables
+
+    return variables
             
 
-def robot_mode_check(robot, map, motor3, motor4, tasks, now, holdoff_until, skip_forward, reversing, time_count, turning, 
-                     drop_off_turn_count, at_start, picking_up, readings, scantime, movetime, servo1, servo2, dropping_off, left_old_line):
+def robot_mode_check(variables, now):
     '''checks the current robot mode and takes action accordingly, transferred over from main while loop'''
+
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time = variables
+    #retrieve variables            
+
     
     if robot.mode == "":
         next_item=robot.queue.pop()
@@ -1027,5 +1082,142 @@ def robot_mode_check(robot, map, motor3, motor4, tasks, now, holdoff_until, skip
         robot.stop(motor3, motor4)
         print("REACHED START")
     
+    variables = (at_start,              #0
+                 button,                #1
+                 count,                 #2
+                 dropping_off,          #3
+                 drop_off_turn_count,   #4
+                 holdoff_until,         #5
+                 is_started,            #6
+                 left_old_line,         #7
+                 map,                   #8
+                 motor3,                #9
+                 motor4,                #10
+                 movetime,              #11
+                 moving,                #12
+                 picking_up,            #13
+                 readings,              #14
+                 reversing,             #15
+                 robot,                 #16
+                 scantime,              #17
+                 sensors,               #18
+                 servo1,                #19
+                 servo2,                #20
+                 skip_forward,          #21
+                 tasks,                 #22
+                 time_count,            #23
+                 traffic,               #24
+                 turning,               #25
+                 using_time             #26
+                 )
+    #condense and return new values of variables
 
-    return robot, map, motor3, motor4, tasks, now, holdoff_until, skip_forward, reversing, time_count, turning, drop_off_turn_count, at_start, picking_up, readings, scantime, movetime, servo1, servo2, dropping_off, left_old_line
+    return variables, now
+
+
+def initialise_main_variables():
+        # Status booleans
+    turning=False   # Checks if the turning sequence is running so we just start it once
+    picking_up=False
+    dropping_off=False
+    scantime=0
+    movetime=0
+    traffic=False   # Is there traffic? If so, stop all
+    moving=False 
+    reversing=False # Is the robot reversing or not?
+    time_count=0    # How we keep track of a deadline timewise. Changed by saying time_count=now+3
+    using_time=False    #Are we actually using the time right now or not?
+    is_started=False    # Have we started
+    count=0
+    at_start=True
+    
+    
+    # ADDED (2026-10-15): state for the fixed turns.
+    left_old_line=False   # turning: True once both centre sensors have left the old line
+    holdoff_until=0       # ignore junctions until now reaches this (see JUNCTION_HOLDOFF_MS)
+    # ADDED (2026-10-20): True right after the robot has turned on the spot at a
+    # junction to look into a full slot. Its wheels are then already on the
+    # junction, so the next turn must not drive NODE_FORWARD_MS forwards first
+    # (that would drive it into the rack).
+    skip_forward=False
+    # ADDED (2026-10-20): set when a node was counted as reached right after a
+    # turn (see CLOSE_AFTER_TURN): the wheels are still short of it, so the
+    # NEXT turn only drives this long first (ms). None = the normal
+    # NODE_FORWARD_MS. after_turn_forward_ms holds the value until the
+    # current turn has finished.
+
+    robot=Robot()
+    print(robot.position)
+    reset_map()
+    map=MAP.MAP.copy()
+    # Measure elapsed time
+    robot.start = utime.ticks_ms()
+    # elapsed = utime.ticks_diff(utime.ticks_ms(), start)
+
+    sensors=line_sensor.LineSensorArray([20,21,19,18],True)
+
+    # ADDED (2026-10-20): start the task sensors. calibrate() measures the
+    # magnet sensor's no-magnet zero point, so it runs here, in the start box,
+    # before the start button is pressed (no box / magnet near the robot).
+    tasks = TaskSensors.from_config()
+
+    print("magnet sensor zero point: %s mV" % tasks.calibrate())
+
+
+
+    # ADDED (2026-10-15, safety): start / stop button. Nothing moves until
+    # the button is pressed (see wait_for_start above).
+    button = StartStopButton.from_config()
+
+
+
+
+
+    readings=[]
+
+    drop_off_turn_count=100
+    
+    motor3 = motor.Motor(dirPin=4, PWMPin=5)  # Motor 3 is controlled from Motor Driv2 #1, which is on GP4/5
+    motor4 = motor.Motor(dirPin=7, PWMPin=6)  # Motor 4 is controlled from Motor Driv2 #1, which is on GP4/5
+    
+    servo1, servo2=[Servo(pin) for name, pin in config.SERVO_PINS.items()]
+
+    # ADDED (2026-10-15): use DRIVE_SPEED (top of this file) instead of the
+    # Motor class default of 100 %. Robot.forward / left / right / backward /
+    # about use these two values whenever no explicit speed is passed.
+    motor3.forward_speed = c.DRIVE_SPEED
+    motor3.backward_speed = c.DRIVE_SPEED
+    motor4.forward_speed = c.DRIVE_SPEED
+    motor4.backward_speed = c.DRIVE_SPEED
+
+    is_started=True
+
+    variables = (at_start,              #0
+                 button,                #1
+                 count,                 #2
+                 dropping_off,          #3
+                 drop_off_turn_count,   #4
+                 holdoff_until,         #5
+                 is_started,            #6
+                 left_old_line,         #7
+                 map,                   #8
+                 motor3,                #9
+                 motor4,                #10
+                 movetime,              #11
+                 moving,                #12
+                 picking_up,            #13
+                 readings,              #14
+                 reversing,             #15
+                 robot,                 #16
+                 scantime,              #17
+                 sensors,               #18
+                 servo1,                #19
+                 servo2,                #20
+                 skip_forward,          #21
+                 tasks,                 #22
+                 time_count,            #23
+                 traffic,               #24
+                 turning,               #25
+                 using_time             #26
+                 )
+    return variables
