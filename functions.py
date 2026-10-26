@@ -545,7 +545,8 @@ def robot_mode_check(variables, now):
     at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time = variables
     #retrieve variables            
 
-    
+    count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
+
     if robot.mode == "":
         next_item=robot.queue.pop()
                 

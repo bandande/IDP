@@ -30,8 +30,11 @@ def main():
     variables = f.initialise_main_variables()
     #initialise all the variables, map, tasks, robot, sensors, motors, servos
     button = variables[1]
+    now = utime.ticks_diff(utime.ticks_ms(), variables[16].start)
+    
     f.wait_for_start(button)
     #start running
+
 
     while True:
 
@@ -43,7 +46,6 @@ def main():
         
         if is_started:
             
-            count+=1
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
             variables = f.update_sensors(variables)
 
