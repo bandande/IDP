@@ -26,10 +26,10 @@ can type one command per line:
     servo1 180      move servo1 to 180 degrees (kept inside its
                     config.SERVO_SAFE_RANGE; a servo without one is not used)
     servo1 off      stop the pulses: servo1 goes limp
-    servo2 reset    the safe way to the start position (config.SERVO_RESET:
-                    servo2 goes to 220, then slowly up to 250; servo1 goes
-                    to the middle of its safe range). A limp servo only
-                    accepts "reset"; angles are refused until then.
+    servo2 reset    the safe way to the start position (config.SERVO_RESET;
+                    with none set: straight to the middle of the safe
+                    range). A limp servo only accepts "reset"; angles are
+                    refused until then.
 The viewer's "Grab / Servo" tab sends these when the arrow keys are pressed.
 Every sample then reports the last angle of each servo ("servo" in @S).
 """
@@ -106,9 +106,10 @@ class CommandReader:
         return done
 
 
-def servo_command(line, servos, events):
+def servo_command(line, servos, events, free=False):
     """ADDED (2026-10-23): carry out one command line, e.g. "servo1 135" or
-    "servo1 off". Problems are reported as events (shown in the viewer's log)."""
+    "servo1 off". Problems are reported as events (shown in the viewer's log).
+    free = calibration mode (see stream(servo_free=True))."""
     parts = line.split()
     if len(parts) != 2 or parts[0] not in servos:
         events.append("unknown command %r (expected e.g. 'servo1 135' or 'servo1 off')" % line)
@@ -120,8 +121,8 @@ def servo_command(line, servos, events):
         return
     if parts[1] == "reset":
         # ADDED (2026-10-23): the safe way to the start position
-        # (config.SERVO_RESET, e.g. servo2 220 -> 250 slowly). The stream
-        # pauses while it runs (about 1.6 s).
+        # (config.SERVO_RESET, or straight to the middle of the safe range).
+        # With a path the stream pauses while it runs.
         angle = servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
         if servo.reset_path is None:
             events.append("%s reset: straight to the middle of its safe range, %d deg" % (parts[0], angle))
@@ -134,6 +135,11 @@ def servo_command(line, servos, events):
         events.append("bad angle in %r" % line)
         return
     if servo.angle() is None:
+        if free:
+            # ADDED (2026-10-26): calibration mode (no safe range known after
+            # the hardware change): start straight at the angle asked for.
+            events.append("%s started at %d deg (calibration mode)" % (parts[0], servo.start_at(angle)))
+            return
         # CHANGED (2026-10-23): a limp servo only starts with "reset"
         events.append("%s has no pulses yet: send '%s reset' first" % (parts[0], parts[0]))
         return
@@ -144,7 +150,7 @@ def servo_command(line, servos, events):
 
 
 def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=None, period_ms=50,
-           seconds=None, mag_pin=None, servo_pins=None):
+           seconds=None, mag_pin=None, servo_pins=None, servo_free=False):
     if line_pins is None:
         line_pins = [config.LINE_OUTER_LEFT_PIN, config.LINE_INNER_LEFT_PIN,
                      config.LINE_INNER_RIGHT_PIN, config.LINE_OUTER_RIGHT_PIN]
@@ -224,16 +230,25 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
     # one, so it gets no pulses (stays limp) until the PC sends a command.
     # Each servo only accepts angles inside its config.SERVO_SAFE_RANGE; a
     # servo without a safe range is left out (never moved).
+    # ADDED (2026-10-26): servo_free=True = CALIBRATION MODE, for measuring
+    # the safe ranges again after the gripper hardware changed: the ranges and
+    # resets in config.py are ignored, every servo may use 0 .. 270 (270 =
+    # 2.5 ms stays the hard limit in actuators/servo.py), and a limp servo
+    # starts straight at the first angle sent.
     if servo_pins is None:
         servo_pins = config.SERVO_PINS
     servos = {}
     for name in sorted(servo_pins):
         safe = config.SERVO_SAFE_RANGE.get(name)
-        if safe is None:
+        if servo_free:
+            safe = (0, Servo.MAX_ANGLE)
+        elif safe is None:
             errors.append("servo %s left out: no safe range in config.SERVO_SAFE_RANGE" % name)
             continue
         try:
             servos[name] = Servo(servo_pins[name], safe, config.SERVO_RESET.get(name))
+            if servo_free:
+                servos[name].reset_path = None     # the old reset path belongs to the old hardware
             servos[name].off()
         except Exception as e:
             errors.append("servo %s: %r" % (name, e))
@@ -272,6 +287,7 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
         # ADDED (2026-10-23): [name, GPIO, safe low, safe high, reset path or None] per servo
         "servo": [[name, servo_pins[name], servos[name].low, servos[name].high, servos[name].reset_path]
                   for name in sorted(servos)],
+        "servo_free": servo_free,       # ADDED (2026-10-26): calibration mode on?
         "errors": errors,
     })
 
@@ -311,7 +327,7 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
                     frame = ir.get_frame()
             # ADDED (2026-10-23): servo commands typed by the PC (viewer).
             for text in commands.lines():
-                servo_command(text, servos, events)
+                servo_command(text, servos, events, servo_free)
 
             if ticks_diff(now, last_emit) >= period_ms:
                 last_emit = now

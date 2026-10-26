@@ -105,13 +105,20 @@ class World:
         self.pad_poles = {}             # pad node -> "north" / "south"
         self.boxes = set()              # dead-end nodes with a box in the rack slot ahead
         self._box_rects = []            # (name, x0, y0, x1, y1)
+        # ADDED (2026-10-26): a box to pick up on each pad, seen by the front
+        # ToF; it is taken away when the gripper closes in front of it and the
+        # robot then carries it (its magnet stays at the magnet sensor).
+        self._pickup_rects = []         # (pad name, x0, y0, x1, y1)
+        self.carrying = None            # pad name of the box the robot holds
+        self.grip_pin = None            # servo2 signal pin
+        self.grip_closed_duty = None    # duty at or below which servo2 counts as closed
         self.ir_pin = None
         self.light = None               # (red_s, green_s, phase_s) or None
         self._noise = 12345
         self._update_line_sensors()
 
     def setup_task_world(self, mag_pin=None, pad_poles=None, mag_north_sign=1, boxes=(),
-                         ir_pin=None, light=None, ir_when="green"):
+                         ir_pin=None, light=None, ir_when="green", grip_pin=None, grip_closed_duty=None):
         """Magnets in the pick-up pads, boxes already in rack slots, traffic light.
 
         pad_poles: {"GREEN": "north", ...}; boxes: dead-end node names whose
@@ -126,6 +133,11 @@ class World:
         self.ir_pin = ir_pin
         self.light = light
         self.ir_when = ir_when
+        # ADDED (2026-10-26): boxes to pick up, one per pad (see __init__)
+        self._pickup_rects = [self._pickup_rect(pad["name"]) for pad in self.track.pads]
+        self.carrying = None
+        self.grip_pin = grip_pin
+        self.grip_closed_duty = grip_closed_duty
         if ir_pin is not None:
             self.inputs[ir_pin] = 1     # TSOP4838 output idles HIGH
 
@@ -149,6 +161,12 @@ class World:
         pts = [(nx + dx * d + dy * l, ny + dy * d - dx * l) for d in (near, far) for l in (-half, half)]
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         return (node, min(xs), min(ys), max(xs), max(ys))
+
+    def _pickup_rect(self, pad):
+        """ADDED (2026-10-26): the box to pick up on `pad`: a 5 cm square on
+        the pad centre."""
+        bx, by = self.track.nodes[pad]
+        return (pad, bx - 0.025, by - 0.025, bx + 0.025, by + 0.025)
 
     # -- time -------------------------------------------------------------
     def advance(self, us):
@@ -202,6 +220,17 @@ class World:
 
     def pwm_output(self, pin, duty):
         self.duty[pin] = duty
+        # ADDED (2026-10-26): servo2 closing with a pick-up box right in front
+        # of the nose (front ToF 80 mm or less, its ray hitting that box)
+        # takes the box.
+        if (pin == self.grip_pin and duty and self.grip_closed_duty is not None
+                and duty <= self.grip_closed_duty and self.carrying is None):
+            d = self.front_distance_mm()
+            for rect in self._pickup_rects:
+                if d is not None and d <= 80 and self._ahead_hits(rect):
+                    self._pickup_rects.remove(rect)
+                    self.carrying = rect[0]
+                    break
 
     def adc_input(self, pin):
         if pin == self.mag_pin:
@@ -217,6 +246,11 @@ class World:
 
     def magnet_field_mv(self):
         """Field at the magnet sensor: +-600 mV within 10 cm of a pad with a magnet."""
+        # ADDED (2026-10-26): a carried box keeps its magnet at the sensor
+        if self.carrying is not None:
+            pole = self.pad_poles.get(self.carrying)
+            if pole is not None:
+                return 600 * (self.mag_north_sign if pole == "north" else -self.mag_north_sign)
         nx, ny = self.nose()
         for pad in self.track.pads:
             pole = self.pad_poles.get(pad["name"])
@@ -237,10 +271,12 @@ class World:
         ox, oy = self.nose()
         dx, dy = math.cos(self.th), math.sin(self.th)
         best = None
-        for name, x0, y0, x1, y1 in self._box_rects:
+        for name, x0, y0, x1, y1 in self._box_rects + self._pickup_rects:   # CHANGED (2026-10-26)
             if x0 <= ox <= x1 and y0 <= oy <= y1:
                 return 15     # pressed against a box: a real VL53L0X reads "very close" (or garbage)
-        rects = [r[1:] for r in self._box_rects] + [(0.0, 0.0, self.track.width, self.track.length)]
+        # CHANGED (2026-10-26): the boxes on the pick-up pads are seen too
+        rects = ([r[1:] for r in self._box_rects] + [r[1:] for r in self._pickup_rects]
+                 + [(0.0, 0.0, self.track.width, self.track.length)])
         for i, (x0, y0, x1, y1) in enumerate(rects):
             d = _ray_box(ox, oy, dx, dy, x0, y0, x1, y1, inside_exit=(i == len(rects) - 1))
             if d is not None and (best is None or d < best):
@@ -248,6 +284,12 @@ class World:
         if best is None or best * 1000 > max_mm:
             return None
         return int(best * 1000)
+
+    def _ahead_hits(self, rect):
+        """ADDED (2026-10-26): does the front ToF's ray hit this box first?"""
+        ox, oy = self.nose()
+        dx, dy = math.cos(self.th), math.sin(self.th)
+        return _ray_box(ox, oy, dx, dy, rect[1], rect[2], rect[3], rect[4]) is not None
 
     def light_state(self, t_s=None):
         if self.light is None:

@@ -20,6 +20,9 @@ from control.start_stop import StartStopButton
 # "Task sensors". A sensor that fails to start is left out with a warning
 # and its check uses a safe fallback.
 from control.task_sensors import TaskSensors
+# ADDED (2026-10-26): the two gripper servos (actuators/servo.py). Each one
+# only ever moves inside its config.SERVO_SAFE_RANGE.
+from actuators.servo import Servo
 
 # DRIVE_SPEED: percent of full motor power used by Robot.forward / left /
 #     right / backward when no explicit speed is given (motor.Motor's own
@@ -163,6 +166,61 @@ def update_sensors(sensors, robot):
     robot.right_sensor = 1 if bits & OUTER_RIGHT else 0
 
 
+def gripper_end(servo, end):
+    """ADDED (2026-10-26): the angle of the "low" or "high" end of a servo's
+    safe range (config.SERVO_SAFE_RANGE)."""
+    return servo.low if end == "low" else servo.high
+
+
+def gripper_carry(gripper):
+    """ADDED (2026-10-26): move the gripper slowly to the pose it is held in
+    while driving (config.GRIPPER_CARRY: servo1 up, servo2 open), servo1
+    first so the arm is up before the gripper opens."""
+    for name in ("servo1", "servo2"):
+        servo = gripper.get(name)
+        if servo is not None:
+            servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "high")), config.GRIPPER_STEP_MS)
+
+
+def gripper_start(gripper):
+    """ADDED (2026-10-26): first gripper movement after power-up. Each servo
+    has had no pulses, so its position is unknown: reset() brings it to the
+    middle of its safe range (or along config.SERVO_RESET), the only safe way
+    to start it. Then it goes slowly to the carry pose."""
+    for name in ("servo1", "servo2"):
+        servo = gripper.get(name)
+        if servo is not None:
+            servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
+    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+    gripper_carry(gripper)
+    print("gripper ready: " + ", ".join("%s %s deg" % (n, gripper[n].angle()) for n in sorted(gripper)))
+
+
+def grab_box(gripper):
+    """ADDED (2026-10-26): pick the box up, with the robot standing in front
+    of it: servo1 down to its low end, servo2 down to its low end (the
+    gripper closes on the box), then servo1 up to its high end. Each move is
+    slow (config.GRIPPER_STEP_MS per degree) and followed by a short pause."""
+    s1, s2 = gripper.get("servo1"), gripper.get("servo2")
+    for servo, end, what in ((s1, "low", "arm down"), (s2, "low", "gripper closed"), (s1, "high", "arm up")):
+        if servo is None:
+            continue
+        servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
+        print("gripper: %s (%s deg)" % (what, servo.angle()))
+        utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+
+
+def release_box(gripper):
+    """ADDED (2026-10-26): let go of the box: servo2 opens a little
+    (config.GRIPPER_RELEASE_DEG, never past its safe range)."""
+    s2 = gripper.get("servo2")
+    if s2 is None or s2.angle() is None:
+        return
+    s2.move_slowly(s2.angle() + config.GRIPPER_RELEASE_DEG, config.GRIPPER_STEP_MS)
+    print("gripper: released (servo2 %s deg)" % s2.angle())
+    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+
+
 def wait_for_start(button):
     """ADDED (2026-10-15, safety): block until the start/stop button is pressed.
 
@@ -211,8 +269,11 @@ def main():
     # current turn has finished.
     next_forward_ms=None
     after_turn_forward_ms=None
+    # ADDED (2026-10-26): True while the robot drives up to the box at a
+    # pick-up (see "pick_up" below).
+    picking_up=False
 
-    
+
     robot=functions.Robot()
     print(robot.position)
     functions.reset_map()
@@ -242,7 +303,13 @@ def main():
     # ADDED (2026-10-15, safety): start / stop button. Nothing moves until
     # the button is pressed (see wait_for_start above).
     button = StartStopButton.from_config()
+    # ADDED (2026-10-26): the gripper servos. Servo(pin) takes each servo's
+    # safe range from config.py. They get no pulses yet (limp).
+    gripper = dict((name, Servo(pin)) for name, pin in config.SERVO_PINS.items())
     wait_for_start(button)
+    # ADDED (2026-10-26): only now, after the start press (nothing moves
+    # before it), the gripper is reset the safe way and set to its carry pose.
+    gripper_start(gripper)
     is_started=True
     #start running
     while True:
@@ -298,6 +365,7 @@ def main():
                     next_forward_ms=None
                     after_turn_forward_ms=None
                     holdoff_until=0
+                    picking_up=False          # ADDED (2026-10-26)
                     at_start=True
                     wait_for_start(button)
                     start = utime.ticks_ms()
@@ -663,12 +731,51 @@ def main():
                             next_forward_ms = after_turn_forward_ms
                             after_turn_forward_ms = None
             elif robot.mode == "pick_up":
-                #Do some actual grabbing stuff etc
-                robot.previous_position=robot.position
-                robot.position=robot.objective
-                print(robot.position)
-                utime.sleep(1)
-                print("GRABBING STUFF")
+                # CHANGED (2026-10-26): the real pick-up. The robot has just
+                # turned into the red / green pick-up box. Two steps:
+                #   1. (first loop) gripper to its carry pose (open), then
+                #      drive on slowly (config.GRAB_APPROACH_SPEED);
+                #   2. (every loop) read the FRONT distance sensor; when it
+                #      reads config.GRAB_STOP_MM or less - or after
+                #      config.GRAB_APPROACH_MAX_MS as a safety limit - stop
+                #      and pick the box up (grab_box(): servo1 down, servo2
+                #      closed, servo1 up), read its magnet and go on with
+                #      the route (the queue backs out of the box as before).
+                # The old placeholder here was a 1 s sleep.
+                if not picking_up:
+                    picking_up=True
+                    robot.previous_position=robot.position
+                    robot.position=robot.objective
+                    print(robot.position)
+                    print("GRABBING STUFF: driving up to the box")
+                    gripper_carry(gripper)
+                    robot.forward(motor3, motor4, config.GRAB_APPROACH_SPEED, config.GRAB_APPROACH_SPEED)
+                    time_count = now + config.GRAB_APPROACH_MAX_MS
+                    continue
+                distance = tasks.front_distance_now()
+                close = distance is not None and distance <= config.GRAB_STOP_MM
+                if not close and now < time_count:
+                    # Keep driving up to the box. While the two centre line
+                    # sensors still see the line into the box, steer along it
+                    # (the turn into the short stub can end a little skew):
+                    # line only under the centre-LEFT sensor = line to the
+                    # left = slow the left wheel (motor3), and the other way
+                    # round. With no line (or both on it) drive straight.
+                    left_speed = right_speed = config.GRAB_APPROACH_SPEED
+                    if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+                        left_speed -= config.GRAB_STEER
+                    elif robot.front_right_sensor == 1 and robot.front_left_sensor == 0:
+                        right_speed -= config.GRAB_STEER
+                    robot.forward(motor3, motor4, left_speed, right_speed)
+                    continue
+                robot.stop(motor3, motor4)
+                if close:
+                    print("box %d mm in front - picking it up" % distance)
+                else:
+                    print("WARNING: no box within %d mm after %d ms - picking up anyway"
+                          % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
+                grab_box(gripper)
+                picking_up=False
                 # This should have the grabbing and so on code
                 # robot.drop_off_info[1]=0
                 # CHANGED (2026-10-20): the fixed 0 above was a placeholder for
@@ -690,14 +797,23 @@ def main():
                 pass
             elif robot.mode == "drop_off":
                 #Do some actual grabbing stuff etc
+                robot.stop(motor3, motor4)        # ADDED (2026-10-26)
                 utime.sleep(2)
                 print("DROPPING STUFF")
                 # This should have the grabbing and so on code
-            
+                # ADDED (2026-10-26): open servo2 a little to let go of the box.
+                release_box(gripper)
+
                 map[robot.final_objective]["type"]="FILLED"
                 robot.box_count+=1
                 robot.has_box=False
                 robot.mode=""
+                # ADDED (2026-10-26): testing the whole sequence once - stop
+                # here after the first drop-off. A press of the start / stop
+                # button goes on with the route (back to the start box).
+                if config.STOP_AFTER_DROP:
+                    is_started=False
+                    print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")
                 
                 
             elif robot.mode == "wait_light":

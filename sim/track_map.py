@@ -75,7 +75,12 @@ BOX_HALF_WIDTH = 0.15     # start box: half of its east-west size
 BOX_NORTH = 0.08          # start box: north edge is this far north of the start line
 BOX_SOUTH = 0.22          # start box: south edge is this far south of the start line
 PAD_Y = (0.58, 0.75)      # the two pad stubs on each side line (southern one first)
-PAD_DISTANCE = 0.15       # from a side line to the centre of its pads
+# CHANGED (2026-10-26): 0.35 (was 0.15, an estimate from the video). At the
+# pick-up the robot turns into the pad and then drives on until the box is
+# 50 mm ahead (main.py), so on the real table the box is AHEAD of the robot's
+# nose (~0.22 m in front of the rear axle) after that turn. With 0.15 the pad
+# was under the robot and the turn ended on the pad's outline.
+PAD_DISTANCE = 0.35       # from a side line to the centre of its pads
 RUNG_Y = (1.12, 1.24, 1.36, 1.48, 1.60, 1.72)   # the six rungs, south to north
 RUNG_LENGTH = 0.25        # from a long line to the end of a rung (just short of the rack)
 Y_END = 2.25              # T-bars at the north ends of the three long lines
