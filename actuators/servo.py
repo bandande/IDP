@@ -85,11 +85,10 @@ class Servo:
         With a reset_path (start, end): go to `start`, wait settle_ms so the
         servo has really arrived there, then turn slowly to `end`, one degree
         every step_ms. So the servo always finishes by moving from start to
-        end (used for the old gripper: servo2 220 -> 250). Without a
-        reset_path (the new gripper, 2026-10-26): straight to the middle of
-        the safe range, so a servo inside its range never leaves it. Every
-        angle sent is inside the safe range. With a path this WAITS until the
-        servo is there. Returns the final angle."""
+        end (servo2: 220 -> 250, the only direction that is safe for the
+        gripper). Without a reset_path: straight to the middle of the safe
+        range. Every angle sent is inside the safe range. This WAITS until
+        the servo is there (about 1.6 s for servo2). Returns the final angle."""
         if self.reset_path is None:
             self._drive((self.low + self.high) // 2)
             return self._angle
