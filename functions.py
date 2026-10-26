@@ -1,4 +1,3 @@
-from MAP import MAP
 import constants as c
 from collections import deque
 from motor import Motor
@@ -270,7 +269,7 @@ class Robot:
     
     def find_route(self, location):
         # Check that both locations exist
-        if self.position not in MAP.MAP or location not in MAP:
+        if self.position not in MAP.MAP or location not in MAP.MAP:
             return ["Error position and location not found"]
 
         # Queue of locations to explore
@@ -305,7 +304,7 @@ class Robot:
                 if neighbour is None:
                     continue
 
-                if neighbour not in MAP:
+                if neighbour not in MAP.MAP:
                     continue
 
                 if neighbour not in previous:
