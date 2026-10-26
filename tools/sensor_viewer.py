@@ -86,6 +86,7 @@ def parse_pins(text):
     return [int(x) for x in text.split(",") if x != ""]
 
 
+
 class Link:
     """Serial connection with a background reader thread feeding a queue."""
 
@@ -100,34 +101,102 @@ class Link:
         buf = b""
         while self.alive:
             try:
-                chunk = self.ser.read(4096)
+                chunk = self.ser.read(256)
             except (serial.SerialException, OSError) as e:
                 if self.alive:
                     self.out.put(("error", "serial error: %s" % e))
                 break
+
             if not chunk:
+                # Don't lose output that has no newline, such as a REPL prompt.
+                if buf:
+                    self.out.put((
+                        "line",
+                        buf.decode("utf-8", "replace").rstrip("\r")
+                    ))
+                    buf = b""
                 continue
+
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                self.out.put(("line", line.decode("utf-8", "replace").rstrip("\r")))
+                self.out.put((
+                    "line",
+                    line.decode("utf-8", "replace").rstrip("\r")
+                ))
 
     def start_stream(self, args):
-        self.ser.write(b"\r\x03\x03")          # Ctrl-C twice: stop whatever is running
-        time.sleep(0.3)
-        # CHANGED (2026-10-23): no more Ctrl-D soft reset here. A soft reset
-        # runs main.py, and stopping it with Ctrl-C ran its `finally`, which
-        # sent the servos to 0 degrees - outside their safe range. Instead the
-        # robot code's modules are forgotten, so freshly uploaded files are
-        # still used by the import below.
-        purge = ("import sys\r"
-                 "for _m in [k for k in sys.modules if k.split('.')[0] in "
-                 "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]: del sys.modules[_m]\r"
-                 "\r")
-        self.ser.write(purge.encode())
-        time.sleep(0.3)
-        cmd = "from tests.stream_sensors import stream; stream(%s)\r" % args
-        self.ser.write(cmd.encode())
+        """Interrupt the current program, clear cached project modules,
+        and start the sensor stream without resetting the Pico."""
+        try:
+            # Stop the current program and allow the REPL to recover.
+            self.ser.write(b"\x03\x03")
+            time.sleep(1.0)
+
+            # Clear project imports in a single REPL command.
+            purge = (
+                "import sys; "
+                "[sys.modules.pop(k, None) for k in list(sys.modules) "
+                "if k.split('.')[0] in "
+                "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]"
+                "\r"
+            )
+            self.ser.write(purge.encode("utf-8"))
+            time.sleep(0.5)
+
+            # Start streaming.
+            cmd = (
+                "from tests.stream_sensors import stream; "
+                "stream(%s)\r" % args
+            )
+            self.ser.write(cmd.encode("utf-8"))
+
+        except (serial.SerialException, OSError) as e:
+            self.out.put(("error", "Could not start sensor stream: %s" % e))
+
+    def send(self, text):
+        """Send a command to the running stream."""
+        try:
+            self.ser.write((text + "\n").encode("utf-8"))
+        except (serial.SerialException, OSError) as e:
+            self.out.put(("error", "Could not send command: %s" % e))
+
+    def stop_stream(self):
+        try:
+            self.ser.write(b"\x03")
+        except (serial.SerialException, OSError):
+            pass
+
+    def close(self):
+        self.stop_stream()
+        self.alive = False
+        time.sleep(0.15)
+        try:
+            self.ser.close()
+        except (serial.SerialException, OSError):
+            pass
+
+    
+def start_stream(self, args):
+    # Stop any currently running program.
+    self.ser.write(b"\r\x03\x03")
+    time.sleep(0.5)
+
+    # Clear cached project modules without resetting the Pico.
+    purge = (
+        "import sys\r"
+        "for _m in [k for k in sys.modules if k.split('.')[0] in "
+        "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]: "
+        "del sys.modules[_m]\r"
+        "\r"
+    )
+    self.ser.write(purge.encode())
+    time.sleep(1.0)
+
+    # Start the sensor stream separately.
+    cmd = "from tests.stream_sensors import stream; stream(%s)\r" % args
+    self.ser.write(cmd.encode())
+
 
     def send(self, text):
         """ADDED (2026-10-23): type one command line to the running stream,

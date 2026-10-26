@@ -400,7 +400,7 @@ def update_sensors(variables):
     variables[16].front_left_sensor = 1 if bits & INNER_LEFT else 0
     variables[16].front_right_sensor = 1 if bits & INNER_RIGHT else 0
     variables[16].right_sensor = 1 if bits & OUTER_RIGHT else 0
-
+    
     return variables
 
 
@@ -471,7 +471,7 @@ def wait_for_start(button):
 def button_check(variables):
     '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
     
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time = variables
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time , mean_scan= variables
     #retrieve variables            
 
     
@@ -576,7 +576,8 @@ def button_check(variables):
                  time_count,            #23
                  traffic,               #24
                  turning,               #25
-                 using_time             #26
+                 using_time,            #26
+                 mean_scan,             #27
                  )
     #condense and return new values of variables
 
@@ -586,7 +587,7 @@ def button_check(variables):
 def robot_mode_check(variables, now):
     '''checks the current robot mode and takes action accordingly, transferred over from main while loop'''
 
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time = variables
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time, mean_scan = variables
     #retrieve variables            
 
     count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
@@ -771,12 +772,13 @@ def robot_mode_check(variables, now):
                 
                 
     elif robot.mode == "correction":
-    
+        print("correcting")
         if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
             robot.stop(motor3,motor4)
             robot.mode="" # Moves back to straight or turning
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
             time_count=now+time_count
+            print("CORRECTED")
         # Detect if there is a dead_end. If there is, then stop going straight.
         elif robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and robot.queue[-1]=="straight":
             #' I can specify further with more ifs
@@ -863,15 +865,13 @@ def robot_mode_check(variables, now):
                 elif robot.mode_specific[0]=="about":
                     robot.about(motor3,motor4)
                     time_count=now+turn_min*2
-    
                 at_start=False
     
     
         elif robot.mode_extra_specific=="move_turning":
                         # If we need crash detection or anything here then do it
-            if robot.front_left_sensor == 0 and robot.front_right_sensor == 0:
-                left_old_line = True
-            if now<time_count or not left_old_line:
+
+            if now<time_count:
                 pass
             else:
                 if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
@@ -895,159 +895,166 @@ def robot_mode_check(variables, now):
         # config.GRAB_STOP_MM or less (or after config.GRAB_APPROACH_MAX_MS),
         # stop, pick the box up (servo1 down, servo2 closed, servo1 up),
         # read its magnet and go on with the route.
-        if not picking_up:
-            picking_up=True
-            robot.previous_position=robot.position
-            robot.position=robot.objective
-            print("GRABBING STUFF: driving up to the box")
-            gripper_carry(servo1, servo2)
-            robot.forward(motor3, motor4, config.GRAB_APPROACH_SPEED, config.GRAB_APPROACH_SPEED)
-            time_count = now + config.GRAB_APPROACH_MAX_MS
-        else:
-            distance = tasks.front_distance_now()
-            close = distance is not None and distance <= config.GRAB_STOP_MM
-            if not close and now < time_count:
-                left_speed = right_speed = config.GRAB_APPROACH_SPEED
-                if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
-                    left_speed -= config.GRAB_STEER       # line to the left: turn left
-                elif robot.front_right_sensor == 1 and robot.front_left_sensor == 0:
-                    right_speed -= config.GRAB_STEER      # line to the right: turn right
-                robot.forward(motor3, motor4, left_speed, right_speed)
-            else:
-                robot.stop(motor3, motor4)
-                if close:
-                    print("box %d mm in front - picking it up" % distance)
-                else:
-                    print("WARNING: no box within %d mm after %d ms - picking up anyway"
-                          % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
-                grab_box(servo1, servo2)
-                pole = tasks.read_pole()
-                level = tasks.level_for_pole(pole)
-                robot.drop_off_info[1] = 1 if level == "TOP" else 0
-                print("box magnet: %s (strongest field %s mV) -> %s level" % (
-                    pole if pole else "NOT FOUND", tasks.last_field_mv, level))
-                map[robot.final_objective]["type"]="COLLECTED"
-                robot.has_box=True
-                picking_up=False
-                robot.mode=""
-        
-                
         # if not picking_up:
-        #                 #Do some actual grabbing stuff etc
+        #     picking_up=True
         #     robot.previous_position=robot.position
         #     robot.position=robot.objective
-        #     print(robot.position)
-        #     utime.sleep(1)
-        #     print("GRABBING STUFF")
-        #     # Turning hasn't started, do the turns
-        #     picking_up=True
-        #     robot.mode_extra_specific="scan"
-                        
-                        
-        #     readings = [10000 for i in range(10)]
-        #     time_count=now+c.SCAN_TURN_TIME
-        #     scantime=now
-        #     robot.spin(motor3, motor4, "left", c.TURN_SPEED)
-                        
-    
-        # elif robot.mode_extra_specific=="scan":
-        #     if now>=time_count and motor3.return_state()==-1:
-        #         time_count+=c.SCAN_TURN_TIME*2
-        #         robot.spin(motor3, motor4, "right", c.TURN_SPEED/2)
-        #     elif now>=time_count and motor3.return_state()==1:
-        #         time_count+=c.SCAN_TURN_TIME*2
-        #         robot.spin(motor3, motor4, "left", c.TURN_SPEED/2)
-                        
-        #     if now%5==0:
-        #         if tasks.front_tof.poll():
-        #             d = tasks.front_tof.get_distance()
-        #             if d is not None:
-        #                 readings.append(d)
-        #         read=readings[-10:]
-        #         read.sort()
-        #         mean_scan=read[5]
-        #         if mean_scan<c.DISTANCE_TO_SCAN_PICK_UP:
-        #             scantime=now-scantime
-        #             robot.mode_extra_specific="move_straight"
-        #             robot.forward(motor3,motor4,c.DRIVE_SPEED/2,c.DRIVE_SPEED/2)
-        #             movetime=now
-        #             time_count=now+500
-                                
-                                
-        # elif robot.mode_extra_specific=="move_straight":
-        #     if now>=time_count and motor3.return_state()==1:
-        #         time_count+=500
-        #         robot.forward(motor3,motor4,c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
-        #     elif now>=time_count and motor3.return_state()==-1:
-        #         # Go back to scan if see nothing
-        #         robot.mode_extra_specific="scan"
-        #         robot.spin(motor3, motor4, "left", c.TURN_SPEED/2)
-            
-        #     if tasks.front_tof.poll():
-        #         d = tasks.front_tof.get_distance()
-        #         if d is not None:
-        #             readings.append(d)
-        #         read=readings[-10:]
-        #         read.sort()
-        #         mean_scan=read[5]
-                        
-        #     if mean_scan<c.DISTANCE_TO_PICK_UP:
-        #         movetime=now-movetime
-        #         robot.mode_extra_specific="pick_up_grab_start"
-        #         robot.stop(motor3,motor4)
-                    
-        # elif robot.mode_extra_specific=="pick_up_grab_start":
-        #     pole = tasks.read_pole()
-        #     if pole:
+        #     print("GRABBING STUFF: driving up to the box")
+        #     gripper_carry(servo1, servo2)
+        #     robot.forward(motor3, motor4, config.GRAB_APPROACH_SPEED, config.GRAB_APPROACH_SPEED)
+        #     time_count = now + config.GRAB_APPROACH_MAX_MS
+        # else:
+        #     distance = tasks.front_distance_now()
+        #     close = distance is not None and distance <= config.GRAB_STOP_MM
+        #     if not close and now < time_count:
+        #         left_speed = right_speed = config.GRAB_APPROACH_SPEED
+        #         if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+        #             left_speed -= config.GRAB_STEER       # line to the left: turn left
+        #         elif robot.front_right_sensor == 1 and robot.front_left_sensor == 0:
+        #             right_speed -= config.GRAB_STEER      # line to the right: turn right
+        #         robot.forward(motor3, motor4, left_speed, right_speed)
+        #     else:
+        #         robot.stop(motor3, motor4)
+        #         if close:
+        #             print("box %d mm in front - picking it up" % distance)
+        #         else:
+        #             print("WARNING: no box within %d mm after %d ms - picking up anyway"
+        #                   % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
+        #         grab_box(servo1, servo2)
+        #         pole = tasks.read_pole()
         #         level = tasks.level_for_pole(pole)
         #         robot.drop_off_info[1] = 1 if level == "TOP" else 0
         #         print("box magnet: %s (strongest field %s mV) -> %s level" % (
-        #         pole if pole else "NOT FOUND", tasks.last_field_mv, level))
-        #     else:
-        #         # In case it can't see it
-        #         print("CANT SEE")
-        #         robot.mode="move_straight"
-        #         robot.forward(motor3,motor4,c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
-        #         time_count=now+500
-        #         pass
-        #                 # Engage servos
-                        
-        #     print("SERVO1 set angle:" +str(10))
-        #     servo1.set_angle(10)
-        #     utime.sleep_ms(500)
-        #     print("SERVO2 set angle:" +str(10))
-        #     servo2.set_angle(10)
-        #     utime.sleep_ms(500)
-                        
-        #                 # Do the whole servo grabbing motion
-        #     robot.mode_extra_specific="return_straight"
-        #     time_count=now+movetime%500
-        #     robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
-                        
-        # elif robot.mode_extra_specific=="return_straight":
-        #     if now>=time_count:
-        #         robot.mode_extra_specific="return turn"
-        #         time_count=now+scantime%c.SCAN_TURN_TIME
-        #         if scantime%(c.SCAN_TURN_TIME*4)+c.SCAN_TURN_TIME<c.SCAN_TURN_TIME*2:
-        #             robot.spin(motor3,motor4,"right", c.TURN_SPEED/2)
-        #         else:
-        #             robot.spin(motor3,motor4,"left", c.TURN_SPEED/2)
-        # elif robot.mode_extra_specific=="return_turn":  
-        #     if now>=time_count:
+        #             pole if pole else "NOT FOUND", tasks.last_field_mv, level))
         #         map[robot.final_objective]["type"]="COLLECTED"
-        #         robot.mode=""
         #         robot.has_box=True
         #         picking_up=False
+        #         robot.mode=""
+        
+                
+        if not picking_up:
+                        #Do some actual grabbing stuff etc
+            robot.previous_position=robot.position
+            robot.position=robot.objective
+            print(robot.position)
+            utime.sleep(1)
+            print("GRABBING STUFF")
+            # Turning hasn't started, do the turns
+            picking_up=True
+            robot.mode_extra_specific="scan"
+                        
+                        
+            readings = [10000 for i in range(10)]
+            time_count=now+c.SCAN_TURN_TIME
+            scantime=now
+            robot.spin(motor3, motor4, "left", 50)
+                        
+    
+        elif robot.mode_extra_specific=="scan":
+            
+            if now>=time_count and motor3.return_state()==-1:
+                time_count+=c.SCAN_TURN_TIME*2
+                print("timecount:" +str(time_count))
+                print(now)
+                robot.spin(motor3, motor4, "right", 50)
+                print("spinning_left")
+            elif now>=time_count and motor3.return_state()==1:
+                time_count+=c.SCAN_TURN_TIME*2
+                robot.spin(motor3, motor4, "left", 50)
+                print("spinning_right")
+                        
+            if now%5==0:
+                if tasks.front_tof.poll():
+                    d = tasks.front_tof.get_distance()
+                    if d is not None:
+                        readings.append(d)
+                read=readings[-10:]
+                read.sort()
+                mean_scan=read[5]
+                if mean_scan<c.DISTANCE_TO_SCAN_PICK_UP:
+                    print("interruppted")
+                    print(mean_scan)
+                    scantime=now-scantime
+                    robot.mode_extra_specific="move_straight"
+                    robot.forward(motor3,motor4,60,60)
+                    movetime=now
+                    time_count=now+1000
+                    mean_scan=1000000
+                                
+                                
+        elif robot.mode_extra_specific=="move_straight":
+            
+            if now>=time_count and motor3.return_state()==1:
+                print("Go forwards")
+                time_count+=1000
+                robot.forward(motor3,motor4,60, 60, reverse=True)
+            elif now>=time_count and motor3.return_state()==-1:
+                print("Go backwards")
+                # Go back to scan if see nothing
+                robot.mode_extra_specific="scan"
+                robot.spin(motor3, motor4, "left", 50)
+                time_count=now+c.SCAN_TURN_TIME
+            
+            if tasks.front_tof.poll():
+                d = tasks.front_tof.get_distance()
+                if d is not None:
+                    readings.append(d)
+                read=readings[-10:]
+                read.sort()
+                mean_scan=read[5]
+                        
+            if mean_scan<c.DISTANCE_TO_PICK_UP:
+                print("Scanned")
+                movetime=now-movetime
+                robot.mode_extra_specific="pick_up_grab_start"
+                robot.stop(motor3,motor4)
                     
-        #             # This should have the grabbing and so on code
-        #             # robot.drop_off_info[1]=0
-        #             # CHANGED (2026-10-20): the fixed 0 above was a placeholder for
-        #             # the rack level. The level now comes from the magnet in the
-        #             # box: read_pole() watches the magnet sensor for
-        #             # config.MAG_READ_MS and returns "north", "south" or None;
-        #             # config.MAG_POLE_LEVEL turns that into "TOP" / "BOTTOM"
-        #             # (MAG_NO_POLE_LEVEL if no magnet was found). "deliver" reads
-        #             # drop_off_info[1]: 0 -> BOTTOM_ slots, 1 -> TOP_ slots.
+        elif robot.mode_extra_specific=="pick_up_grab_start":
+            pole = tasks.read_pole()
+            if pole:
+                level = tasks.level_for_pole(pole)
+                robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                print("box magnet: %s (strongest field %s mV) -> %s level" % (
+                pole if pole else "NOT FOUND", tasks.last_field_mv, level))
+            else:
+                # In case it can't see it
+                print("CANT SEE")
+                robot.mode="move_straight"
+                robot.forward(motor3,motor4,60, 60)
+                time_count=now+500
+                pass
+        
+            grab_box(servo1, servo2)
+                        
+                        # Do the whole servo grabbing motion
+            robot.mode_extra_specific="return_straight"
+            time_count=now+movetime%500
+            robot.forward(motor3,motor4, 60, 60, reverse=True)
+                        
+        elif robot.mode_extra_specific=="return_straight":
+            if now>=time_count:
+                robot.mode_extra_specific="return turn"
+                time_count=now+scantime%c.SCAN_TURN_TIME
+                if scantime%(c.SCAN_TURN_TIME*4)+c.SCAN_TURN_TIME<c.SCAN_TURN_TIME*2:
+                    robot.spin(motor3,motor4,"right", 50)
+                else:
+                    robot.spin(motor3,motor4,"left", 50)
+        elif robot.mode_extra_specific=="return_turn":  
+            if now>=time_count:
+                map[robot.final_objective]["type"]="COLLECTED"
+                robot.mode=""
+                robot.has_box=True
+                picking_up=False
+                    
+                    # This should have the grabbing and so on code
+                    # robot.drop_off_info[1]=0
+                    # CHANGED (2026-10-20): the fixed 0 above was a placeholder for
+                    # the rack level. The level now comes from the magnet in the
+                    # box: read_pole() watches the magnet sensor for
+                    # config.MAG_READ_MS and returns "north", "south" or None;
+                    # config.MAG_POLE_LEVEL turns that into "TOP" / "BOTTOM"
+                    # (MAG_NO_POLE_LEVEL if no magnet was found). "deliver" reads
+                    # drop_off_info[1]: 0 -> BOTTOM_ slots, 1 -> TOP_ slots.
                     
                     
                         
@@ -1196,7 +1203,8 @@ def robot_mode_check(variables, now):
                  time_count,            #23
                  traffic,               #24
                  turning,               #25
-                 using_time             #26
+                 using_time,            #26
+                 mean_scan,             #27
                  )
     #condense and return new values of variables
 
@@ -1218,6 +1226,7 @@ def initialise_main_variables():
     is_started=False    # Have we started
     count=0
     at_start=True
+    mean_scan=100000
     
     
     # ADDED (2026-10-15): state for the fixed turns.
@@ -1309,6 +1318,7 @@ def initialise_main_variables():
                  time_count,            #23
                  traffic,               #24
                  turning,               #25
-                 using_time             #26
+                 using_time,            #26
+                 mean_scan,             #27
                  )
     return variables

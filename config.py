@@ -146,7 +146,7 @@ MAG_NO_POLE_LEVEL = "BOTTOM"   # level used when no magnet is found
 # Front distance sensor: is the drop slot already full?
 # CHANGED (2026-10-26): FRONT_TOF and GRAB_TOF swapped - on the robot the
 # two sensors were the other way round (dist2 is the one facing forward).
-FRONT_TOF = "dist2"            # the forward-facing ToF (also used to drive up to the box at a pick-up)
+FRONT_TOF = "dist1"            # the forward-facing ToF (also used to drive up to the box at a pick-up)
 SLOT_READ_MS = 250             # collect readings this long in front of a slot
 SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from its junction (turned
                                # to face it, before driving in). A box anywhere in the slot - also one
@@ -156,7 +156,7 @@ SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from 
 # for aiming at it and driving up to it (TaskSensors.box_distance_now() etc.).
 # How it is used is still being decided. The starting values are the ones in
 # main.py's grabbing draft (DISTANCE_TO_SCAN_PICK_UP / DISTANCE_TO_PICK_UP).
-GRAB_TOF = "dist1"             # CHANGED (2026-10-26): swapped with FRONT_TOF (see above)
+GRAB_TOF = "dist2"             # CHANGED (2026-10-26): swapped with FRONT_TOF (see above)
 GRAB_READ_MS = 150             # box_distance(): collect readings this long (robot standing still)
 GRAB_SEE_MM = 150              # TODO measure: closer than this = a box is in front of the sensor
 GRAB_REACH_MM = 20             # TODO measure: this close or closer = close enough to grab. The VL53L0X

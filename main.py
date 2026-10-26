@@ -54,7 +54,7 @@ def main():
 
             if len(robot.queue)==0:
                 variables[16].box_count+=1
-                variables[16].queue=["go_back","deliver","collect"]
+                variables[16].queue=["go_back","deliver","collect", "pick_up"]
             
             variables, now = f.robot_mode_check(variables, now)
             # Action
