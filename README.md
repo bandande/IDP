@@ -94,6 +94,19 @@ Sensor modules
 
 ### The main program (`main.py`)
 
+**CHANGED (2026-10-26): `main.py`, `functions.py` and `constants.py` are now
+the partner's version from `main` (commit b4ff1d8: line following and
+navigation in `functions.robot_mode_check()`, all state in one tuple), so that
+the robot is tested with the partner's line following. Our gripper sequence
+is added to its `pick_up` / `drop_off` (`functions.gripper_start`,
+`grab_box`, `release_box`; marked "test build"), and its servo1 / servo2 are
+now taken by name (MicroPython dicts do not keep their order). Our own
+navigation (CLOSE_AFTER_TURN, check_slot, ... described below) is in the
+history of this branch (commit 3598b7c). In the simulator this version passes
+1 of 6 checks: the partner's turning values were tuned on the real robot and
+it does not turn at MIDDLE_LEFT in the sim; the result is the same without
+the gripper changes.**
+
 The robot works through a queue of tasks (`robot.queue`, used from the end):
 `collect` (plan the route to the next pad + `pick_up`), `deliver` (plan the
 route to the first free drop slot + `drop_off`) and `go_back` (route to START
