@@ -33,6 +33,9 @@ def main():
     now = utime.ticks_diff(utime.ticks_ms(), variables[16].start)
     
     f.wait_for_start(button)
+    # ADDED (2026-10-26, test build): after the start press (nothing moves
+    # before it) reset the gripper the safe way and set its carry pose.
+    f.gripper_start(variables[19], variables[20])
     #start running
 
 

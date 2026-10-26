@@ -406,6 +406,51 @@ def update_sensors(variables):
 
 
 
+# ADDED (2026-10-26, test build): the gripper, from our branch (xz-dev).
+# Both servos only ever move inside config.SERVO_SAFE_RANGE, one degree at a
+# time (Servo.move_slowly), and a servo with no pulses is only started with
+# its safe reset (straight to the middle of its range).
+def gripper_end(servo, end):
+    """The angle of the "low" or "high" end of a servo's safe range."""
+    return servo.low if end == "low" else servo.high
+
+
+def gripper_carry(servo1, servo2):
+    """Gripper to its carry pose (config.GRIPPER_CARRY: servo1 up, servo2
+    open), servo1 first so the arm is up before the gripper opens."""
+    for name, servo in (("servo1", servo1), ("servo2", servo2)):
+        servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "high")), config.GRIPPER_STEP_MS)
+
+
+def gripper_start(servo1, servo2):
+    """First gripper movement after the start press: safe reset of both
+    servos (their position is unknown), then the carry pose."""
+    for servo in (servo1, servo2):
+        servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
+    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+    gripper_carry(servo1, servo2)
+    print("gripper ready: servo1 %s deg, servo2 %s deg" % (servo1.angle(), servo2.angle()))
+
+
+def grab_box(servo1, servo2):
+    """Pick the box up, standing in front of it: servo1 down to its low end,
+    servo2 down to its low end (gripper closes), servo1 up to its high end."""
+    for servo, end, what in ((servo1, "low", "arm down"), (servo2, "low", "gripper closed"),
+                             (servo1, "high", "arm up")):
+        servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
+        print("gripper: %s (%s deg)" % (what, servo.angle()))
+        utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+
+
+def release_box(servo2):
+    """Let go of the box: servo2 opens by config.GRIPPER_RELEASE_DEG."""
+    if servo2.angle() is None:
+        return
+    servo2.move_slowly(servo2.angle() + config.GRIPPER_RELEASE_DEG, config.GRIPPER_STEP_MS)
+    print("gripper: released (servo2 %s deg)" % servo2.angle())
+    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+
+
 def wait_for_start(button):
     """ADDED (2026-10-15, safety): block until the start/stop button is pressed.
 
@@ -843,12 +888,48 @@ def robot_mode_check(variables, now):
                                 
                                 
     elif robot.mode == "pick_up":
-        robot.previous_position=robot.position
-        robot.position=robot.objective
-        utime.sleep(2)
-        map[robot.final_objective]["type"]="COLLECTED"
-        print("Picking up stuff")
-        robot.mode=""
+        # CHANGED (2026-10-26, test build): the real pick-up (was a 2 s wait).
+        # First loop: gripper to its carry pose (open) and drive on slowly.
+        # Every loop after that: steer along the line while the two centre
+        # sensors see it; when the FRONT distance sensor reads
+        # config.GRAB_STOP_MM or less (or after config.GRAB_APPROACH_MAX_MS),
+        # stop, pick the box up (servo1 down, servo2 closed, servo1 up),
+        # read its magnet and go on with the route.
+        if not picking_up:
+            picking_up=True
+            robot.previous_position=robot.position
+            robot.position=robot.objective
+            print("GRABBING STUFF: driving up to the box")
+            gripper_carry(servo1, servo2)
+            robot.forward(motor3, motor4, config.GRAB_APPROACH_SPEED, config.GRAB_APPROACH_SPEED)
+            time_count = now + config.GRAB_APPROACH_MAX_MS
+        else:
+            distance = tasks.front_distance_now()
+            close = distance is not None and distance <= config.GRAB_STOP_MM
+            if not close and now < time_count:
+                left_speed = right_speed = config.GRAB_APPROACH_SPEED
+                if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+                    left_speed -= config.GRAB_STEER       # line to the left: turn left
+                elif robot.front_right_sensor == 1 and robot.front_left_sensor == 0:
+                    right_speed -= config.GRAB_STEER      # line to the right: turn right
+                robot.forward(motor3, motor4, left_speed, right_speed)
+            else:
+                robot.stop(motor3, motor4)
+                if close:
+                    print("box %d mm in front - picking it up" % distance)
+                else:
+                    print("WARNING: no box within %d mm after %d ms - picking up anyway"
+                          % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
+                grab_box(servo1, servo2)
+                pole = tasks.read_pole()
+                level = tasks.level_for_pole(pole)
+                robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                print("box magnet: %s (strongest field %s mV) -> %s level" % (
+                    pole if pole else "NOT FOUND", tasks.last_field_mv, level))
+                map[robot.final_objective]["type"]="COLLECTED"
+                robot.has_box=True
+                picking_up=False
+                robot.mode=""
         
                 
         # if not picking_up:
@@ -983,6 +1064,13 @@ def robot_mode_check(variables, now):
         map[robot.final_objective]["type"]="FILLED"
                                     
         robot.mode=""
+        # ADDED (2026-10-26, test build): open servo2 a little to let go of
+        # the box, then stop (config.STOP_AFTER_DROP; a press goes on).
+        robot.stop(motor3, motor4)
+        release_box(servo2)
+        if config.STOP_AFTER_DROP:
+            is_started=False
+            print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")
         
         # if not dropping_off:
         #                 #Do some actual grabbing stuff etc
@@ -1180,7 +1268,10 @@ def initialise_main_variables():
     motor3 = motor.Motor(dirPin=4, PWMPin=5)  # Motor 3 is controlled from Motor Driv2 #1, which is on GP4/5
     motor4 = motor.Motor(dirPin=7, PWMPin=6)  # Motor 4 is controlled from Motor Driv2 #1, which is on GP4/5
     
-    servo1, servo2=[Servo(pin) for name, pin in config.SERVO_PINS.items()]
+    # FIX (2026-10-26, test build): by name - MicroPython dicts do not keep
+    # their order, so .items() could hand servo2 out first.
+    servo1 = Servo(config.SERVO_PINS["servo1"])
+    servo2 = Servo(config.SERVO_PINS["servo2"])
 
     # ADDED (2026-10-15): use DRIVE_SPEED (top of this file) instead of the
     # Motor class default of 100 %. Robot.forward / left / right / backward /
