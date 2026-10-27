@@ -97,9 +97,7 @@ class PickUp:
         self.servo1 = servo1
         self.servo2 = servo2
         self.tasks = tasks
-        if uturn_direction not in ("left", "right"):
-            raise ValueError("uturn_direction must be 'left' or 'right', not %r" % (uturn_direction,))
-        self.uturn_direction = uturn_direction
+
 
         # The public state, read by main.py and the simulator check.
         self.phase = "idle"
@@ -166,8 +164,9 @@ class PickUp:
             self._update_to_box(now_ms)
         elif self.phase == "grab":
             self._update_grab(now_ms)
-        elif self.phase == "u_turn":
-            self._update_u_turn(now_ms)
+        elif self.phase == "reverse":
+            print("now its reverse")
+            self._update_reverse(now_ms)
         elif self.phase == "back_to_main":
             self._update_back_to_main(now_ms)
 
@@ -283,11 +282,13 @@ class PickUp:
             self._box_gripped = True
             return
 
-        self._change_phase("u_turn", now_ms, "box held")
+        print("reverse")
+        self._change_phase("reverse", now_ms, "box held")
         self._left_line = False
-        self.robot.spin(self.motor3, self.motor4, self.uturn_direction, config.PICKUP_UTURN_SPEED)
+        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
-    def _update_u_turn(self, now_ms):
+    def _update_reverse(self, now_ms):
         """Step 4: spin on the spot (self.uturn_direction) until the robot faces back along
         the stub line. The U-turn is finished only when ALL of these hold:
           (a) at least PICKUP_UTURN_MIN_MS have passed since the spin began,
@@ -297,16 +298,13 @@ class PickUp:
         (a) and (b) stop the U-turn from ending at once, while the centre
         sensors are still on the line the robot started on."""
         r = self.robot
-        centre_left_white = r.front_left_sensor == 1
-        centre_right_white = r.front_right_sensor == 1
 
-        if not centre_left_white and not centre_right_white:
-            self._left_line = True          # condition (b)
 
-        long_enough = (now_ms - self._phase_start_ms) >= config.PICKUP_UTURN_MIN_MS   # condition (a)
-        on_line_again = centre_left_white and centre_right_white                       # condition (c)
 
-        if long_enough and self._left_line and on_line_again:
+        print((now_ms - self._phase_start_ms))
+        long_enough = (now_ms - self._phase_start_ms) >= config.PICKUP_REVERSE_MIN_MS   # condition (a)
+
+        if long_enough and (r.left_sensor == 1 or r.right_sensor == 1):
             self.robot.stop(self.motor3, self.motor4)
             self._change_phase("back_to_main", now_ms,
                                "line found again after %d ms" % (now_ms - self._phase_start_ms))
@@ -319,7 +317,8 @@ class PickUp:
             return
 
         # Keep spinning (sent again every call, like the other phases).
-        self.robot.spin(self.motor3, self.motor4, self.uturn_direction, config.PICKUP_UTURN_SPEED)
+        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
     def _update_back_to_main(self, now_ms):
         """Step 5: follow the stub line back until BOTH outer sensors see
@@ -343,7 +342,9 @@ class PickUp:
             self._fail(now_ms, "main line not found within %d ms" % config.PICKUP_BACK_MAX_MS)
             return
 
-        self._follow_line()
+        # self._follow_line()
+        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
     # -----------------------------------------------------------------
     # Small helpers

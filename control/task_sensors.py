@@ -208,11 +208,9 @@ class TaskSensors:
         return self.grab_tof.get_distance()
 
     def rear_distance_now(self):
-        """CHANGED (2026-10-27, was front_distance_now): non-blocking, the
-        newest filtered distance (mm) from the REAR sensor (config.REAR_TOF),
-        or None (nothing in range, reading too old, or no rear sensor). For
-        checking a drop slot while reversing into its branch."""
+
         if self.rear_tof is None:
+            print("none you stupid boy")
             return None
         self.rear_tof.poll()
         return self.rear_tof.get_distance()

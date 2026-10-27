@@ -1,3 +1,4 @@
+
 """
 The drop-off at a rack slot: let go of the box, then push it in.
 

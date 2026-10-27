@@ -297,12 +297,13 @@ GRAB_APPROACH_MAX_MS = 4000    # never drive towards the box longer than this
 GRIPPER_STEP_MS = 10           # servos turn 1 degree every this many ms (gentle, no jumps)
 GRIPPER_PAUSE_MS = 300         # wait after each gripper movement
 GRIPPER_CARRY = {"servo1": "high", "servo2": "high"}   # pose while driving ("low" / "high" end)
+GRIPPER_SAFE = {"servo1": "low", "servo2": "low"}
 GRIPPER_RELEASE_DEG = 10       # TODO tune: how far servo2 opens to let go of the box
 STOP_AFTER_DROP = True         # stop after the first drop-off (testing the whole sequence once)
 # ADDED (2026-10-27): stop on the main line right after the pick-up (U-turn
 # done, the box's magnet pole reported). For now the robot does not turn left /
 # right because of the pole; set False to go on with the route.
-STOP_AFTER_PICKUP = True
+STOP_AFTER_PICKUP = False
 
 # ADDED (2026-10-27): pushing the box into its slot at the drop-off
 # (control/dropoff.py release_and_push). After the gripper has let go:
@@ -371,7 +372,7 @@ PICKUP_UTURN_SPEED = 50        # motor power (%) of both wheels while spinning r
 # wrong line (found in the simulator). So each box spins AWAY from its
 # neighbour: GREEN_1 / RED_2 have the neighbour on their left -> spin right.
 PICKUP_UTURN_DIRECTION = {"GREEN_1": "right", "GREEN_2": "left", "RED_1": "left", "RED_2": "right"}
-PICKUP_UTURN_MIN_MS = 800      # the U-turn never ends earlier than this
+PICKUP_REVERSE_MIN_MS = 1400      # the U-turn never ends earlier than this
 PICKUP_UTURN_MAX_MS = 6000     # step 4 time limit
 PICKUP_BACK_MAX_MS = 8000      # step 5 time limit
 

@@ -41,6 +41,12 @@ def gripper_carry(servo1, servo2):
     for name, servo in (("servo1", servo1), ("servo2", servo2)):
         servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "high")), config.GRIPPER_STEP_MS)
 
+def gripper_safe(servo1, servo2):
+    """Gripper to its carry pose (config.GRIPPER_CARRY: servo1 up, servo2
+    open), servo1 first so the arm is up before the gripper opens."""
+    for name, servo in (("servo1", servo1), ("servo2", servo2)):
+        print(config.GRIPPER_SAFE.get(name, "low"))
+        servo.move_slowly(gripper_end(servo, config.GRIPPER_SAFE.get(name, "low")), config.GRIPPER_STEP_MS)
 
 def gripper_start(servo1, servo2):
     """First gripper movement after the start press: safe reset of both
@@ -54,7 +60,7 @@ def gripper_start(servo1, servo2):
         carry = gripper_end(servo, config.GRIPPER_CARRY.get(name, "high"))
         servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS, target=carry)
     utime.sleep_ms(config.GRIPPER_PAUSE_MS)
-    gripper_carry(servo1, servo2)       # no move now; still needed if a servo has a reset path
+    gripper_safe(servo1, servo2)       # no move now; still needed if a servo has a reset path
     print("gripper ready: servo1 %s deg, servo2 %s deg" % (servo1.angle(), servo2.angle()))
 
 
