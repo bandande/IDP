@@ -86,6 +86,7 @@ def parse_pins(text):
     return [int(x) for x in text.split(",") if x != ""]
 
 
+
 class Link:
     """Serial connection with a background reader thread feeding a queue."""
 
@@ -100,34 +101,102 @@ class Link:
         buf = b""
         while self.alive:
             try:
-                chunk = self.ser.read(4096)
+                chunk = self.ser.read(256)
             except (serial.SerialException, OSError) as e:
                 if self.alive:
                     self.out.put(("error", "serial error: %s" % e))
                 break
+
             if not chunk:
+                # Don't lose output that has no newline, such as a REPL prompt.
+                if buf:
+                    self.out.put((
+                        "line",
+                        buf.decode("utf-8", "replace").rstrip("\r")
+                    ))
+                    buf = b""
                 continue
+
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                self.out.put(("line", line.decode("utf-8", "replace").rstrip("\r")))
+                self.out.put((
+                    "line",
+                    line.decode("utf-8", "replace").rstrip("\r")
+                ))
 
     def start_stream(self, args):
-        self.ser.write(b"\r\x03\x03")          # Ctrl-C twice: stop whatever is running
-        time.sleep(0.3)
-        # CHANGED (2026-10-23): no more Ctrl-D soft reset here. A soft reset
-        # runs main.py, and stopping it with Ctrl-C ran its `finally`, which
-        # sent the servos to 0 degrees - outside their safe range. Instead the
-        # robot code's modules are forgotten, so freshly uploaded files are
-        # still used by the import below.
-        purge = ("import sys\r"
-                 "for _m in [k for k in sys.modules if k.split('.')[0] in "
-                 "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]: del sys.modules[_m]\r"
-                 "\r")
-        self.ser.write(purge.encode())
-        time.sleep(0.3)
-        cmd = "from tests.stream_sensors import stream; stream(%s)\r" % args
-        self.ser.write(cmd.encode())
+        """Interrupt the current program, clear cached project modules,
+        and start the sensor stream without resetting the Pico."""
+        try:
+            # Stop the current program and allow the REPL to recover.
+            self.ser.write(b"\x03\x03")
+            time.sleep(1.0)
+
+            # Clear project imports in a single REPL command.
+            purge = (
+                "import sys; "
+                "[sys.modules.pop(k, None) for k in list(sys.modules) "
+                "if k.split('.')[0] in "
+                "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]"
+                "\r"
+            )
+            self.ser.write(purge.encode("utf-8"))
+            time.sleep(0.5)
+
+            # Start streaming.
+            cmd = (
+                "from tests.stream_sensors import stream; "
+                "stream(%s)\r" % args
+            )
+            self.ser.write(cmd.encode("utf-8"))
+
+        except (serial.SerialException, OSError) as e:
+            self.out.put(("error", "Could not start sensor stream: %s" % e))
+
+    def send(self, text):
+        """Send a command to the running stream."""
+        try:
+            self.ser.write((text + "\n").encode("utf-8"))
+        except (serial.SerialException, OSError) as e:
+            self.out.put(("error", "Could not send command: %s" % e))
+
+    def stop_stream(self):
+        try:
+            self.ser.write(b"\x03")
+        except (serial.SerialException, OSError):
+            pass
+
+    def close(self):
+        self.stop_stream()
+        self.alive = False
+        time.sleep(0.15)
+        try:
+            self.ser.close()
+        except (serial.SerialException, OSError):
+            pass
+
+    
+def start_stream(self, args):
+    # Stop any currently running program.
+    self.ser.write(b"\r\x03\x03")
+    time.sleep(0.5)
+
+    # Clear cached project modules without resetting the Pico.
+    purge = (
+        "import sys\r"
+        "for _m in [k for k in sys.modules if k.split('.')[0] in "
+        "('tests', 'sensors', 'control', 'actuators', 'libs', 'config')]: "
+        "del sys.modules[_m]\r"
+        "\r"
+    )
+    self.ser.write(purge.encode())
+    time.sleep(1.0)
+
+    # Start the sensor stream separately.
+    cmd = "from tests.stream_sensors import stream; stream(%s)\r" % args
+    self.ser.write(cmd.encode())
+
 
     def send(self, text):
         """ADDED (2026-10-23): type one command line to the running stream,
@@ -605,8 +674,8 @@ class ServoPage(tk.Frame):
         Shift + Left / Right five steps at once
         1 / 2                select servo1 / servo2 (or click its card)
         x                    selected servo limp (no pulses)
-        r                    safe reset (config.SERVO_RESET: servo2 220 -> 250
-                             slowly, servo1 to the middle of its safe range).
+        r                    safe reset (config.SERVO_RESET; with none set:
+                             straight to the middle of the safe range).
                              A limp servo always starts with this reset: the
                              first arrow key press on it sends the reset.
                              No angle outside config.SERVO_SAFE_RANGE is ever
@@ -639,12 +708,19 @@ class ServoPage(tk.Frame):
         self.cards = {}        # name -> (frame, canvas, big label, info label)
         self.selected = None
         self.locked = {}       # name -> angle it is locked at (Enter key, grab confirmed)
+        self.free = False      # ADDED (2026-10-26): calibration mode (see on_hello)
+        self.goto_vars = {}    # name -> the card's "go to" field
         self.saved = []        # [(label, {name: angle}, grab mm)]
         self.grab_mm = None
         self._build()
 
     # ------------------------------------------------------------ layout
     def _build(self):
+        # ADDED (2026-10-26): red banner, shown only in calibration mode
+        self.banner = tk.Label(self, bg="#fde2e1", fg=RED, font=FONT_BOLD, justify="left", anchor="w", text=(
+            "CALIBRATION MODE (gripper hardware changed): the safe ranges and resets in config.py are NOT used.\n"
+            "Only the 270 deg limit (2.5 ms pulse) is kept. A limp servo starts straight at the angle in its "
+            "'go to' field: set a safe one first. Find the new limits, save them, then put them in config.py."))
         self.help = tk.Label(self, bg=BG, font=FONT, justify="left", anchor="w", text=(
             "Keys:  Left / Right = selected servo -/+ step     Shift + Left / Right = 5 steps     "
             "1 / 2 = select servo     x = limp     r = safe reset     Enter = LOCK / unlock the grab angle\n"
@@ -727,6 +803,7 @@ class ServoPage(tk.Frame):
             limit_entry.bind("<Return>", lambda e: self.focus_set())
             var.trace_add("write", lambda *args: self.draw(name))
         goto = tk.StringVar(value=str(self.middle(name)))
+        self.goto_vars[name] = goto      # ADDED (2026-10-26): calibration mode starts from it
         go_entry = ttk.Entry(frame, textvariable=goto, width=5)
         go_entry.grid(row=3, column=2)
         go_entry.bind("<Return>", lambda e: (self.go_to(name, goto.get()), self.focus_set()))
@@ -736,7 +813,8 @@ class ServoPage(tk.Frame):
                    command=lambda: self.limp(name)).grid(row=3, column=3)
         # ADDED (2026-10-23): the safe reset (see reset())
         ttk.Button(frame, text="reset", width=6, takefocus=0,
-                   command=lambda: self.busy(name) or self.reset(name)).grid(row=4, column=1)
+                   command=lambda: self.key("r", False) if self.free else (self.busy(name) or self.reset(name))
+                   ).grid(row=4, column=1)
         for w in (frame, canvas, big, info):
             w.bind("<Button-1>", lambda e: self.select(name))
         frame.pack(fill="x", pady=4)
@@ -798,8 +876,8 @@ class ServoPage(tk.Frame):
 
     def reset(self, name):
         """ADDED (2026-10-23): ask the Pico for the servo's safe reset
-        (config.SERVO_RESET: servo2 220 -> 250 slowly; servo1 straight to the
-        middle of its safe range). A limp servo can only be started this way.
+        (config.SERVO_RESET, or with none set: straight to the middle of the
+        safe range). A limp servo can only be started this way.
         Keys for this servo wait until the Pico reports its angle again."""
         if self.is_locked(name):
             return
@@ -832,14 +910,38 @@ class ServoPage(tk.Frame):
             return
         # ADDED (2026-10-23): a limp servo is started with its safe reset,
         # never with a jump to an angle (its real position is unknown).
+        # CHANGED (2026-10-26): in calibration mode there is no known safe
+        # reset: it starts at the angle typed in its "go to" field instead.
         if self.reported.get(name) is None:
-            self.reset(name)
+            if self.free:
+                self.start_free(name)
+            else:
+                self.reset(name)
             return
         lo, hi = self.limit_range(name)
         angle = max(lo, min(hi, int(round(angle))))
         self.target[name] = angle
         if not self.send("%s %d" % (name, angle)):
             self.log("not connected: servo command not sent", "err")
+        self.draw(name)
+
+    def start_free(self, name):
+        """ADDED (2026-10-26): calibration mode, limp servo: send the angle in
+        its "go to" field (inside the limits typed in the card); the Pico
+        starts the servo straight there."""
+        try:
+            angle = float(self.goto_vars[name].get())
+        except ValueError:
+            self.log("type a start angle in the 'go to' field of %s first" % name, "err")
+            return
+        lo, hi = self.limit_range(name)
+        angle = max(lo, min(hi, int(round(angle))))
+        if not self.send("%s %d" % (name, angle)):
+            self.log("not connected: servo command not sent", "err")
+            return
+        self.target[name] = angle
+        self.resetting[name] = time.time()     # keys wait until the Pico reports the angle
+        self.log("%s starts at %d deg (calibration mode)" % (name, angle), "ev")
         self.draw(name)
 
     def go_to(self, name, text):
@@ -849,6 +951,8 @@ class ServoPage(tk.Frame):
             self.log("'go to' needs a number of degrees", "err")
             return
         self.select(name)
+        if self.free and self.reported.get(name) is None:
+            self.goto_vars[name].set(str(int(round(angle))))   # ADDED (2026-10-26)
         self.move(name, angle)
 
     def limp(self, name):
@@ -872,7 +976,9 @@ class ServoPage(tk.Frame):
             self.limp(self.selected)
             return
         if keysym in ("r", "R"):                 # ADDED (2026-10-23)
-            if not self.busy(self.selected):
+            if self.free:
+                self.log("calibration mode: no safe reset is known - use 'go to'", "err")
+            elif not self.busy(self.selected):
                 self.reset(self.selected)
             return
         sign = -1 if keysym == "Left" else 1
@@ -942,6 +1048,12 @@ class ServoPage(tk.Frame):
         self.reset_paths = dict((row[0], row[4] if len(row) >= 5 else None) for row in servos)
         self.resetting = {}
         self.reported = dict((n, None) for n in names)   # a new stream starts with limp servos
+        # ADDED (2026-10-26): calibration mode (stream started with servo_free=True)
+        self.free = bool(h.get("servo_free"))
+        if self.free:
+            self.banner.pack(fill="x", pady=(0, 4), before=self.help)
+        else:
+            self.banner.pack_forget()
         if self.locked:
             # the restarted stream has let every servo go limp: a lock means nothing now
             self.log("stream restarted: the servos are limp, locks cleared", "err")
@@ -1215,8 +1327,12 @@ class Viewer(tk.Tk):
                 self.write_log("Warning: GP%d is used by more than one sensor" % gp, "err")
             if gp in config.BOARD_PINS:
                 self.write_log("Warning: GP%d is a robot board pin (%s)" % (gp, config.BOARD_PINS[gp]), "err")
-        return "line_pins=%r, crash_pins=%r, ir_pin=%d, use_tof=%r, mag_pin=%d" % (
+        args = "line_pins=%r, crash_pins=%r, ir_pin=%d, use_tof=%r, mag_pin=%d" % (
             line, crash, ir[0] if ir else -1, bool(self.tof_var.get()), mag[0] if mag else -1)
+        # ADDED (2026-10-26): --servo-free = servo calibration mode on the Pico
+        if getattr(self.options, "servo_free", False):
+            args += ", servo_free=True"
+        return args
 
     def toggle_connect(self):
         if self.link is not None:
@@ -1489,6 +1605,10 @@ def main():
     parser.add_argument("--tab", choices=("overview", "tof", "mag", "servo"), default="overview",
                         help="tab shown first (servo = Grab / Servo calibration, added 2026-10-23)")
     parser.add_argument("--record", help="append every line received from the Pico to this file")
+    # ADDED (2026-10-26)
+    parser.add_argument("--servo-free", action="store_true",
+                        help="servo CALIBRATION mode: ignore the safe ranges / resets in config.py "
+                             "(after a hardware change); only the 270 deg limit stays")
     Viewer(parser.parse_args()).mainloop()
 
 

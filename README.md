@@ -94,6 +94,19 @@ Sensor modules
 
 ### The main program (`main.py`)
 
+**CHANGED (2026-10-26): `main.py`, `functions.py` and `constants.py` are now
+the partner's version from `main` (commit b4ff1d8: line following and
+navigation in `functions.robot_mode_check()`, all state in one tuple), so that
+the robot is tested with the partner's line following. Our gripper sequence
+is added to its `pick_up` / `drop_off` (`functions.gripper_start`,
+`grab_box`, `release_box`; marked "test build"), and its servo1 / servo2 are
+now taken by name (MicroPython dicts do not keep their order). Our own
+navigation (CLOSE_AFTER_TURN, check_slot, ... described below) is in the
+history of this branch (commit 3598b7c). In the simulator this version passes
+1 of 6 checks: the partner's turning values were tuned on the real robot and
+it does not turn at MIDDLE_LEFT in the sim; the result is the same without
+the gripper changes.**
+
 The robot works through a queue of tasks (`robot.queue`, used from the end):
 `collect` (plan the route to the next pad + `pick_up`), `deliver` (plan the
 route to the first free drop slot + `drop_off`) and `go_back` (route to START
@@ -114,6 +127,19 @@ them out. Changes of 2026-10-20, all marked in the code:
     is planned (all full -> reset, as before);
   - before driving up the ramp (START -> TOP_CENTRE) the robot waits for the
     traffic light (`wait_light`, IR beacon = green, no time limit).
+- **Gripper** (2026-10-26, settings in `config.py` under "Gripper servos"):
+  - after the start press both servos are reset the safe way (straight to
+    the middle of their safe range) and go slowly to the carry pose (servo1
+    up, servo2 open);
+  - `pick_up`: after turning into the red / green pick-up box the robot
+    drives on slowly (steering along the line while it sees one) until the
+    FRONT distance sensor reads `GRAB_STOP_MM` (50 mm), then servo1 down,
+    servo2 closed, servo1 up, reads the box magnet and goes on with the route;
+  - `drop_off`: servo2 opens by `GRIPPER_RELEASE_DEG`; with `STOP_AFTER_DROP`
+    the robot then stops (a button press goes on);
+  - servo safe ranges (new gripper): servo1 155-173, servo2 130-171 deg. No
+    angle outside them is ever sent, every movement is one degree at a time,
+    and a servo with no pulses only starts with its safe reset.
 - **Nodes closer than the line sensors** (`CLOSE_AFTER_TURN`,
   `close_after_turn()`): the sensors are ~20 cm in front of the wheels, so
   after a turn on the spot a node only 8-17 cm away (start box edges, the
@@ -435,11 +461,18 @@ pip install pyserial
 python tools/sensor_viewer.py                       # pick the port, press Connect
 python tools/sensor_viewer.py --tab tof --connect   # open on the Distance tab
 python tools/sensor_viewer.py --tab mag --connect --record log.txt
+python tools/sensor_viewer.py --tab servo --connect               # gripper servos
+python tools/sensor_viewer.py --tab servo --connect --servo-free  # recalibrate after a hardware change
 ```
 
 - Close MicroPico's connection first. The viewer stops whatever runs on the
-  Pico, soft-resets it and starts `tests/stream_sensors.py`, so the code must
-  be uploaded first.
+  Pico (no soft reset any more: that ran `main.py`) and starts
+  `tests/stream_sensors.py`, so the code must be uploaded first.
+- Grab / Servo tab: Left / Right move the selected servo inside its safe
+  range (Shift = 5 steps, 1 / 2 select, x limp, r safe reset, Enter locks the
+  grab angle), next to the distance and magnet readings. `--servo-free`
+  ignores the safe ranges in `config.py` (only the 270 degree limit stays):
+  for measuring new ranges after the gripper hardware changed.
 - Wiring row: type GP numbers (not physical numbers) for each sensor group
   and press Apply. The defaults are the schematic pins from `config.py`.
   Leave a field empty to switch that group off. ToF pins always come from
@@ -562,14 +595,22 @@ Main program
 1. Measure on the table / robot and update `main.py`: `SENSOR_AHEAD_M`
    (wheel axle -> line sensors), the distances in `CLOSE_AFTER_TURN`
    (start box edges, pad junction spacing) and `RUNG_SPACING_M`.
-2. Measure `MAG_NORTH_SIGN`, `FRONT_TOF` (which distance sensor faces
-   forward) and `SLOT_OCCUPIED_MM` (robot turned into a slot, empty / full);
-   set `MAG_POLE_LEVEL` to the task rule (`config.py`, "Task sensors").
+2. Measure `MAG_NORTH_SIGN` and `SLOT_OCCUPIED_MM` (robot turned into a
+   slot, empty / full); set `MAG_POLE_LEVEL` to the task rule (`config.py`,
+   "Task sensors"). (`FRONT_TOF` / `GRAB_TOF` were swapped on 2026-10-26:
+   dist2 faces forward.)
 3. Leaving a drop slot with an "about" turn: the wheels are then on the
    junction, so the sensors start past it and the robot can drive on into
    the opposite rung (seen in the simulator). To be handled by the custom
    drop-off function.
-4. The gripper: `pick_up` / `drop_off` only wait.
+4. The gripper (2026-10-26): tune `GRAB_STOP_MM`, `GRAB_APPROACH_SPEED`,
+   `GRIPPER_RELEASE_DEG` on the table and measure the new grab angle
+   (`SERVO_GRAB_ANGLE`). The turn into a pick-up box must end on its line,
+   or the drive up to the box goes skew. Distance sensor dist1 (now the grab
+   sensor, I2C0 GP16 / GP17) does not answer since the hardware change
+   (OSError 110): check its wiring. In the simulator the pads were moved to
+   0.35 m from the side lines, because the box is ahead of the robot after
+   the turn.
 5. A turn that never finds a line keeps spinning (press the button).
 
 Hardware / schematic

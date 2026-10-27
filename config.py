@@ -144,7 +144,9 @@ MAG_NORTH_SIGN = 1             # TODO measure: sign of the field (+1 / -1) when 
 MAG_POLE_LEVEL = {"north": "TOP", "south": "BOTTOM"}   # TODO: the task rule (pole -> rack level)
 MAG_NO_POLE_LEVEL = "BOTTOM"   # level used when no magnet is found
 # Front distance sensor: is the drop slot already full?
-FRONT_TOF = "dist1"            # TODO check: which of TOF_SENSORS faces forward
+# CHANGED (2026-10-26): FRONT_TOF and GRAB_TOF swapped - on the robot the
+# two sensors were the other way round (dist2 is the one facing forward).
+FRONT_TOF = "dist1"            # the forward-facing ToF (also used to drive up to the box at a pick-up)
 SLOT_READ_MS = 250             # collect readings this long in front of a slot
 SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from its junction (turned
                                # to face it, before driving in). A box anywhere in the slot - also one
@@ -154,7 +156,7 @@ SLOT_OCCUPIED_MM = 170         # TODO measure: the robot looks into a slot from 
 # for aiming at it and driving up to it (TaskSensors.box_distance_now() etc.).
 # How it is used is still being decided. The starting values are the ones in
 # main.py's grabbing draft (DISTANCE_TO_SCAN_PICK_UP / DISTANCE_TO_PICK_UP).
-GRAB_TOF = "dist2"             # TODO check: which of TOF_SENSORS is the grab / aiming sensor
+GRAB_TOF = "dist2"             # CHANGED (2026-10-26): swapped with FRONT_TOF (see above)
 GRAB_READ_MS = 150             # box_distance(): collect readings this long (robot standing still)
 GRAB_SEE_MM = 150              # TODO measure: closer than this = a box is in front of the sensor
 GRAB_REACH_MM = 20             # TODO measure: this close or closer = close enough to grab. The VL53L0X
@@ -197,28 +199,56 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # the supply down so far that the Pico resets (this happened on the bench).
 # actuators/servo.py clamps every angle into this range. None = not measured
 # yet: the sensor viewer / stream then refuse to move that servo at all.
-# CHANGED (2026-10-23): servo2 is now 220 - 270. 220 is its GRAB angle
-# (SERVO_GRAB_ANGLE below) and it must never go lower than that. Angles above
-# 270 need pulses longer than the servo's maximum of 2.5 ms (300 deg = 2.72 ms;
-# at 300 servo2 ran away and kept turning faster), so 270 is also a hard
-# limit in actuators/servo.py, whatever is written here.
-SERVO_SAFE_RANGE = {"servo1": (170, 195), "servo2": (220, 270)}
+# CHANGED (2026-10-26): the gripper hardware was changed and recalibrated:
+# servo1 155 - 173 (first measured as 155 - 187, then the top lowered to 173),
+# servo2 130 - 171 (before the change: 170 - 195 and 220 - 270).
+# The pick-up (main.py "pick_up") uses the ends of these ranges: servo1 low =
+# arm down, servo1 high = arm up, servo2 low = gripper closed on the box.
+# Moving a servo outside its range, or the wrong way past an end, breaks the
+# gripper. Angles above 270 need pulses longer than the servo's maximum of
+# 2.5 ms (at 300 a servo ran away), so 270 is also a hard limit in
+# actuators/servo.py, whatever is written here.
+SERVO_SAFE_RANGE = {"servo1": (155, 173), "servo2": (130, 171)}
 # ADDED (2026-10-23): the angle at which the gripper holds a box (measured
 # with the sensor viewer's Grab / Servo tab). servo2 never goes below it.
-SERVO_GRAB_ANGLE = {"servo2": 220}   # CHANGED (2026-10-23): was 222
+# CHANGED (2026-10-26): emptied - the old grab angle (servo2 220) belonged to
+# the old hardware. TODO measure the new one and put it here.
+SERVO_GRAB_ANGLE = {}
 # ADDED (2026-10-23): how a servo is RESET, i.e. brought to its start position
 # when it has had no pulses (after power-up, after a restart, after going
 # limp): (start, end) = go to `start`, wait SERVO_RESET_SETTLE_MS until it is
 # there, then turn slowly to `end`, one degree every SERVO_RESET_STEP_MS.
-# servo2 must always be reset this way, upwards towards 250: turning it the
-# other way can break the gripper. A servo not listed here is reset by going
-# straight to the middle of its safe range.
-# CHANGED (2026-10-23): servo2 reset now starts at 220 (was 200), its grab
-# angle and the low end of its safe range; the direction (up to 250) is
-# unchanged.
-SERVO_RESET = {"servo2": (220, 250)}
+# A servo not listed here is reset by going straight to the middle of its
+# safe range.
+# CHANGED (2026-10-26): emptied for the new hardware. Every reset must stay
+# inside the safe range: going straight to the middle does (a servo that is
+# inside its range only moves between its position and the middle), while a
+# (start, end) path first jumps to `start` and sweeps the range. The old path
+# (servo2 220 -> 250) is outside the new servo2 range anyway.
+SERVO_RESET = {}
 SERVO_RESET_SETTLE_MS = 600
 SERVO_RESET_STEP_MS = 20
+
+# ADDED (2026-10-26): the pick-up and drop-off with the gripper (main.py).
+# Pick-up, when the robot has turned into a red / green pick-up box:
+#   1. drive on slowly until the FRONT distance sensor reads GRAB_STOP_MM or
+#      less (GRAB_APPROACH_MAX_MS is a safety limit: then it stops anyway),
+#   2. servo1 down to its low end, 3. servo2 down to its low end (gripper
+#      closes on the box), 4. servo1 up to its high end,
+#   5. go on following the route.
+# Drop-off, at the end of the route: servo2 opens by GRIPPER_RELEASE_DEG, then
+# the robot stops if STOP_AFTER_DROP (for testing one pick-up and drop-off).
+# While driving the gripper is held at GRIPPER_CARRY: servo1 up, servo2 open
+# (the high ends); it goes there right after the safe reset at the start.
+GRAB_STOP_MM = 50              # stop in front of the box at this front distance (mm)
+GRAB_APPROACH_SPEED = 30       # motor power (%) while driving up to the box
+GRAB_STEER = 15                # the wheel on the line's side runs this much slower (%) to steer along it
+GRAB_APPROACH_MAX_MS = 4000    # never drive towards the box longer than this
+GRIPPER_STEP_MS = 10           # servos turn 1 degree every this many ms (gentle, no jumps)
+GRIPPER_PAUSE_MS = 300         # wait after each gripper movement
+GRIPPER_CARRY = {"servo1": "high", "servo2": "high"}   # pose while driving ("low" / "high" end)
+GRIPPER_RELEASE_DEG = 10       # TODO tune: how far servo2 opens to let go of the box
+STOP_AFTER_DROP = True         # stop after the first drop-off (testing the whole sequence once)
 
 # ---------------------------------------------------------------------------
 # Backup line follower (control/line_follower.py). Speeds are % of full PWM.
@@ -349,6 +379,10 @@ def validate():
         problems.append("GRAB_TOF and FRONT_TOF must be two different sensors")
     if GRAB_REACH_MM >= GRAB_SEE_MM:
         problems.append("GRAB_REACH_MM must be smaller than GRAB_SEE_MM")
+    # ADDED (2026-10-26): steering must leave the slower wheel turning (a
+    # speed of 0 makes Robot.forward() use the full DRIVE_SPEED instead)
+    if not 0 <= GRAB_STEER < GRAB_APPROACH_SPEED:
+        problems.append("GRAB_STEER must be at least 0 and smaller than GRAB_APPROACH_SPEED")
     if MAG_NORTH_SIGN not in (1, -1):
         problems.append("MAG_NORTH_SIGN must be 1 or -1")
     for pole in ("north", "south"):
@@ -367,6 +401,9 @@ def validate():
         path = SERVO_RESET.get(name)
         if path is not None and (safe is None or not (safe[0] <= path[0] <= safe[1] and safe[0] <= path[1] <= safe[1])):
             problems.append("SERVO_RESET[%r] must start and end inside SERVO_SAFE_RANGE[%r]" % (name, name))
+        # ADDED (2026-10-26): the gripper's carry pose names an end of the range
+        if GRIPPER_CARRY.get(name, "high") not in ("low", "high"):
+            problems.append("GRIPPER_CARRY[%r] must be 'low' or 'high'" % name)
         # ADDED (2026-10-23): the grab angle must be inside the safe range too
         grab = SERVO_GRAB_ANGLE.get(name)
         if grab is not None and (safe is None or not (safe[0] <= grab <= safe[1])):

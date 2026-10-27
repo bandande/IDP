@@ -168,10 +168,17 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
     pad_poles = dict(DEFAULT_POLES)
     for name, pole in (poles or {}).items():
         pad_poles[sim_name(name)] = pole
+    # ADDED (2026-10-26): servo2 at (or within 2 degrees of) the low end of
+    # its safe range counts as "gripper closed": in front of a pick-up box
+    # that takes the box (sim/world.py pwm_output()).
+    from actuators.servo import Servo
+    grip_low = config.SERVO_SAFE_RANGE["servo2"][0] + 2
+    grip_closed_duty = int(Servo.MIN_DUTY + grip_low / Servo.MAX_ANGLE * (Servo.MAX_DUTY - Servo.MIN_DUTY))
     world.setup_task_world(mag_pin=config.MAG_PIN, pad_poles=pad_poles,
                            mag_north_sign=config.MAG_NORTH_SIGN,
                            boxes=[sim_name(b) for b in boxes], ir_pin=config.IR_RX_PIN, light=light,
-                           ir_when="red" if config.TRAFFIC_RED_WHEN_IR else "green")
+                           ir_when="red" if config.TRAFFIC_RED_WHEN_IR else "green",
+                           grip_pin=config.SERVO_PINS["servo2"], grip_closed_duty=grip_closed_duty)
 
     # CHANGED (2026-10-23): START_STOP_SENSOR = "push" presses the push button.
     button_pin = {"left": config.CRASH_LEFT_PIN, "right": config.CRASH_RIGHT_PIN,

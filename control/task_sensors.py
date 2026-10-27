@@ -202,6 +202,16 @@ class TaskSensors:
         self.grab_tof.poll()
         return self.grab_tof.get_distance()
 
+    def front_distance_now(self):
+        """ADDED (2026-10-26): non-blocking, the newest filtered distance (mm)
+        from the FRONT sensor (config.FRONT_TOF), or None (nothing in range,
+        reading too old, or no front sensor). main.py calls it every loop
+        while driving up to the box at a pick-up (config.GRAB_STOP_MM)."""
+        if self.front_tof is None:
+            return None
+        self.front_tof.poll()
+        return self.front_tof.get_distance()
+
     def box_distance(self, read_ms=None):
         """Blocking: the median distance (mm) seen by the grab sensor during
         read_ms (default config.GRAB_READ_MS), or None if nothing was in range.
