@@ -772,13 +772,11 @@ def robot_mode_check(variables, now):
                 
                 
     elif robot.mode == "correction":
-        print("correcting")
         if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
             robot.stop(motor3,motor4)
             robot.mode="" # Moves back to straight or turning
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
             time_count=now+time_count
-            print("CORRECTED")
         # Detect if there is a dead_end. If there is, then stop going straight.
         elif robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and robot.queue[-1]=="straight":
             #' I can specify further with more ifs
