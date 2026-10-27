@@ -5,7 +5,8 @@ The white lines come from sim/track_map.py: the table as named nodes with
 positions (metres) and the straight lines between them. (The robot itself
 uses MAP.py, which only knows which node is next to which; the simulator
 needs real positions.) This file adds the line width, the T-bars, the
-coloured pads, the racks, the ramp and the traffic light, for the sensors
+coloured pads, the cross lines in front of the pick-up boxes (ADDED
+2026-10-27), the racks, the ramp and the traffic light, for the sensors
 and the pictures.
 
 Coordinates: metres, origin = south-west corner of the table, x = east,
@@ -55,7 +56,8 @@ class Track:
         self.nodes = {}        # name -> (x, y)
         self.kinds = {}        # name -> "start", "box", "corner", "junction", "pad", "slot", "end"
         self.edges = []        # (a, b, p, q): line from point p to point q, joining nodes a and b
-        self.extra = []        # (p, q): white lines that are not map lines (T-bars, pad outlines)
+        self.extra = []        # (p, q): white lines that are not map lines (T-bars, pad outlines,
+                               # the cross lines in front of the pick-up boxes - CHANGED 2026-10-27)
         self.pads = []         # {"name", "colour", "centre", "size"}
         self.racks = []        # {"name", "colour", "rect": (x0, y0, x1, y1), "slots": [y, ...]}
         self.ramp = None       # (x0, y0, x1, y1)
@@ -145,19 +147,44 @@ def _kind(name):
 
 
 def build_arena(pad_fill_white=True):
-    """The table: lines from track_map.py plus pads, racks, ramp and T-bars."""
+    """The table: lines from track_map.py plus pads, cross lines (2026-10-27), racks, ramp and T-bars."""
     t = Track(track_map.TABLE_WIDTH, track_map.TABLE_LENGTH, LINE_W)
     t.pad_fill_white = pad_fill_white
     for name, (x, y) in track_map.NODES.items():
         t.nodes[name] = (x, y)
         t.kinds[name] = _kind(name)
     for a, b in track_map.LINES:
-        t.edges.append((a, b, track_map.NODES[a], track_map.NODES[b]))
+        p, q = track_map.NODES[a], track_map.NODES[b]
+        # CHANGED (2026-10-27): a pad stub's white line ends at the cross line
+        # in front of the box (track_map.cross_line_centre), not at the pad
+        # centre: between the cross line and the pad the floor is black.
+        # The topology (nodes a, b) stays the same.
+        if b in track_map.PADS:
+            q = track_map.cross_line_centre(b)
+        elif a in track_map.PADS:
+            p = track_map.cross_line_centre(a)
+        t.edges.append((a, b, p, q))
 
     # T-bars across the three north ends
     for end in ("W_END", "S_END", "E_END"):
         x, y = track_map.NODES[end]
         t.extra.append(((x - TBAR / 2, y), (x + TBAR / 2, y)))
+
+    # ADDED (2026-10-27): the white cross line on each pad stub, perpendicular
+    # to the stub and centred on it (track_map.CROSS_LINE_DISTANCE from the
+    # side line). The pick-up follows the stub until all four line sensors
+    # see this line. CROSS_LINE_LENGTH is the total length end to end, and
+    # the painted ends add half a line width each, so the centre line is
+    # LINE_W shorter.
+    for pad in track_map.PADS:
+        cx, cy = track_map.cross_line_centre(pad)
+        jx, jy = track_map.NODES[track_map.pad_junction(pad)]
+        px, py = track_map.NODES[pad]
+        n = math.hypot(px - jx, py - jy)
+        ux, uy = (px - jx) / n, (py - jy) / n         # unit vector along the stub
+        half = (track_map.CROSS_LINE_LENGTH - LINE_W) / 2
+        # (-uy, ux) is the stub direction turned 90 degrees: across the stub
+        t.extra.append(((cx - uy * half, cy + ux * half), (cx + uy * half, cy - ux * half)))
 
     # coloured pads (white outline + coloured square) centred on the pad nodes
     s = PAD_SIZE / 2

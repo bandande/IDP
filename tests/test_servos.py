@@ -41,7 +41,7 @@ def test_servos(rounds=None, pause_s=2):
             for step in ("low end", "middle", "high end"):
                 for name, servo in servos.items():
                     if servo.reset_path is not None:
-                        continue           # servo2: stays where its reset ended
+                        continue           # stays where its reset ended (CHANGED 2026-10-27: no servo has a reset path now)
                     if step == "low end":
                         angle = servo.low
                     elif step == "middle":

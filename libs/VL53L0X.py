@@ -1,6 +1,13 @@
 # VL53L0X driver as distributed in the CUED IDP template (sw/libs/VL53L0X/VL53L0X.py),
-# originally "V53L0X Lidar Library for Micropython devices". Kept unmodified below
-# this header; sensors/tof.py wraps it. Do not edit - fix things in the wrapper.
+# originally "V53L0X Lidar Library for Micropython devices". sensors/tof.py wraps it.
+# CHANGED (2026-10-27): no longer unmodified - register bugs were fixed against
+# the ST API / Pololu driver (lines marked FIX). Known remaining bugs, NOT used
+# by the robot (config.TOF_LONG_RANGE = False): set_Vcsel_pulse_period(),
+# get_sequence_step_timeouts(), encode_timeout(), set_measurement_timing_budget(),
+# perform_single_ref_calibration() and set_signal_rate_limit() read / write
+# several 16-bit registers as 8-bit, decode register ADDRESSES instead of
+# their values, and use `or` instead of `|`. Do not set TOF_LONG_RANGE = True
+# before those are fixed.
 
 from micropython import const
 import ustruct
@@ -204,11 +211,15 @@ class VL53L0X:
             (_REF_EN_START_SELECT, 0xb4),
         )
 
+        # FIX (2026-10-27): SPAD i is bit (i % 8) of byte (i // 8), as in the
+        # ST API, Pololu and Adafruit drivers. This file used bit (i >> 2):
+        # wrong bits were cleared / counted (bytes 4 and 5 never), so the
+        # reference SPADs were set up wrongly (less accurate distances).
         spads_enabled = 0
         for i in range(48):
             if i < 12 and is_aperture or spads_enabled >= spad_count:
-                spad_map[i // 8] &= ~(1 << (i >> 2))
-            elif spad_map[i // 8] & (1 << (i >> 2)):
+                spad_map[i // 8] &= ~(1 << (i % 8))
+            elif spad_map[i // 8] & (1 << (i % 8)):
                 spads_enabled += 1
 
         self._registers(_SPAD_ENABLES, spad_map, struct='6B')
@@ -333,7 +344,10 @@ class VL53L0X:
 
             (0xff, 0x06),
         )
-        self._flag(0x83, 3, True)
+        # FIX (2026-10-27): bit 2 (0x04) of register 0x83, as in the ST API /
+        # Pololu / Adafruit drivers (this file set bit 3 = 0x08). The bit
+        # enables reading the SPAD count / type from the sensor's NVM below.
+        self._flag(0x83, 2, True)
         self._config(
             (0xff, 0x07),
             (0x81, 0x01),
@@ -357,7 +371,7 @@ class VL53L0X:
             (0x81, 0x00),
             (0xff, 0x06),
         )
-        self._flag(0x83, 3, False)
+        self._flag(0x83, 2, False)      # FIX (2026-10-27): bit 2, see above
         self._config(
             (0xff, 0x01),
             (0x00, 0x01),
@@ -394,7 +408,12 @@ class VL53L0X:
             oscilator = self._register(_OSC_CALIBRATE, struct='>H')
             if oscilator:
                 period *= oscilator
-            self._register(_MEASURE_PERIOD, period, struct='>H')
+            # FIX (2026-10-27): SYSTEM_INTERMEASUREMENT_PERIOD (0x04) is a
+            # 32-bit register (ST API / Pololu library: writeReg32Bit). Writing
+            # it as 16 bits ('>H') put the value into its two TOP bytes, so the
+            # period was wrong, and a period above 65535 counts (e.g. 100 ms x
+            # the oscillator value) raised a struct error.
+            self._register(_MEASURE_PERIOD, period, struct='>I')
             self._register(_SYSRANGE_START, 0x04)
         else:
             self._register(_SYSRANGE_START, 0x02)
@@ -402,10 +421,13 @@ class VL53L0X:
 
     def stop(self):
         self._register(_SYSRANGE_START, 0x01)
+        # FIX (2026-10-27): 0x91 = 0x00 when stopping, as in the ST API
+        # (VL53L0X_StopMeasurement) and Pololu's stopContinuous(); the stop
+        # variable is written to 0x91 only when ranging STARTS.
         self._config(
             (0xFF, 0x01),
             (0x00, 0x00),
-            (0x91, self._stop_variable),
+            (0x91, 0x00),
             (0x00, 0x01),
             (0xFF, 0x00),
         )

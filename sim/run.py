@@ -51,12 +51,17 @@ class _TimedOutput(io.TextIOBase):
     """stdout replacement: prefixes each printed line with the simulated time
     and remembers it (with the robot position) for the picture."""
 
-    def __init__(self, world, real, quiet=False):
+    def __init__(self, world, real, quiet=False, on_print=None):
         self.world = world
         self.real = real
         self.quiet = quiet
         self.notes = []
         self._buf = ""
+        # ADDED (2026-10-27): on_print(world, line) is called for every
+        # printed line, at the simulated moment it is printed (sim/check.py
+        # uses it to read the world's true state at a given print, e.g. the
+        # real front distance when the pick-up prints "pickup: grab").
+        self.on_print = on_print
 
     def write(self, s):
         self._buf += s
@@ -66,6 +71,8 @@ class _TimedOutput(io.TextIOBase):
             self.notes.append((w.t(), w.x, w.y, line))
             if not self.quiet:
                 self.real.write("[%7.3f] %s\n" % (w.t(), line))
+            if self.on_print is not None:      # ADDED (2026-10-27), see __init__
+                self.on_print(w, line)
         return len(s)
 
     def flush(self):
@@ -113,6 +120,13 @@ def _parse_light(text):
     return (parts[0], parts[1], parts[2] if len(parts) > 2 else 0.0)
 
 
+def _grab_sensor_missing():
+    """ADDED (2026-10-27): stand-in for task_sensors.make_grab_tof when the
+    grab sensor is switched off (run(..., grab_sensor=False)): it fails the
+    same way a real VL53L0X that does not answer does."""
+    raise OSError("simulator: grab distance sensor switched off")
+
+
 def make_world(track, spec, pose, t_end, stop_on_collision=True):
     import config
     from sim.world import World
@@ -136,11 +150,17 @@ def make_world(track, spec, pose, t_end, stop_on_collision=True):
 def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="north", back=0.20,
         pose=None, spec_overrides=None, kwargs=None, png="sim_run.png", quiet=False,
         stop_on_collision=True, pad_fill_white=True, boxes=(), poles=None, light=(8.0, 8.0, 0.0),
-        press_hold=None):
+        press_hold=None, on_print=None, grab_sensor=True):
     """Run one simulation. Returns (world, notes, end_reason).
 
     notes: [(t, x, y, printed line)]; end_reason: why the run ended.
-    press_hold: {press time: hold ms} for presses longer than the default 80 ms."""
+    press_hold: {press time: hold ms} for presses longer than the default 80 ms.
+    on_print: ADDED (2026-10-27) optional function on_print(world, line),
+    called for every line the robot code prints, at that simulated moment.
+    Keep it short and do not move the robot in it.
+    grab_sensor: ADDED (2026-10-27) False = the grab distance sensor
+    (config.GRAB_TOF) does not start, as if it were not wired, so
+    TaskSensors leaves tasks.grab_tof as None."""
     _setup_paths()
     _forget_robot_modules()
     from sim.fakes import _bus
@@ -163,8 +183,14 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
 
     # Task sensors: magnet (real driver on the fake ADC), IR receiver (real
     # driver on the fake pin), front distance sensor (simulated object).
-    task_sensors.make_front_tof = lambda: SimToF(world)
-    task_sensors.make_grab_tof = lambda: SimToF(world)   # grab sensor: also looks straight ahead
+    # CHANGED (2026-10-27): the rear sensor (config.REAR_TOF) looks BACKWARDS
+    # from the robot's tail; the grab sensor looks forward from the nose.
+    task_sensors.make_rear_tof = lambda: SimToF(world, facing="rear")
+    if grab_sensor:
+        task_sensors.make_grab_tof = lambda: SimToF(world)
+    else:
+        # ADDED (2026-10-27): the grab sensor "does not start" (see the docstring)
+        task_sensors.make_grab_tof = _grab_sensor_missing
     pad_poles = dict(DEFAULT_POLES)
     for name, pole in (poles or {}).items():
         pad_poles[sim_name(name)] = pole
@@ -193,7 +219,7 @@ def run(entry="main:main", seconds=240.0, presses=(0.3,), at="START", heading="n
     if os.path.exists(os.path.join(ROOT, "MAP.py")):
         shutil.copy(os.path.join(ROOT, "MAP.py"), workdir)
     old_cwd, old_stdout = os.getcwd(), sys.stdout
-    out = _TimedOutput(world, old_stdout, quiet)
+    out = _TimedOutput(world, old_stdout, quiet, on_print)    # CHANGED (2026-10-27): on_print
     os.chdir(workdir)
     sys.stdout = out
     try:

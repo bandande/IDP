@@ -87,6 +87,10 @@ class World:
         self.stop_on_collision = stop_on_collision
         self.out_levels = {}            # output pin -> level
         self.duty = {}                  # pwm pin -> duty_u16
+        # ADDED (2026-10-27): pwm pin -> (lowest, highest) NON-ZERO duty sent
+        # during the whole run. sim/check.py turns the servo pins' values into
+        # angles to check that no servo ever left its safe range.
+        self.duty_range = {}
         self.inputs = dict(pins.get("crash", {}))   # input pin -> level (buttons)
         self._line_pin_index = {p: i for i, p in enumerate(pins["line"])}
         self.line_white = [False] * 4
@@ -220,17 +224,30 @@ class World:
 
     def pwm_output(self, pin, duty):
         self.duty[pin] = duty
+        # ADDED (2026-10-27): remember the lowest / highest duty of each pin
+        # (0 = no pulses, e.g. a motor switched off or a limp servo: skipped)
+        if duty:
+            low, high = self.duty_range.get(pin, (duty, duty))
+            self.duty_range[pin] = (min(low, duty), max(high, duty))
         # ADDED (2026-10-26): servo2 closing with a pick-up box right in front
         # of the nose (front ToF 80 mm or less, its ray hitting that box)
         # takes the box.
         if (pin == self.grip_pin and duty and self.grip_closed_duty is not None
                 and duty <= self.grip_closed_duty and self.carrying is None):
-            d = self.front_distance_mm()
+            # FIX (2026-10-27): take the NEAREST box on the ToF's ray, and only
+            # if it is 80 mm or closer. Before, the first box in the list that
+            # the ray hit at any distance was taken: at PAD_YELLOW (facing
+            # west) the ray also hits the PAD_GREEN box across the table, on
+            # the same row, and the robot "carried" the green box (and its
+            # magnet pole).
+            nearest, nearest_d = None, None
             for rect in self._pickup_rects:
-                if d is not None and d <= 80 and self._ahead_hits(rect):
-                    self._pickup_rects.remove(rect)
-                    self.carrying = rect[0]
-                    break
+                rd = self._ahead_distance(rect)
+                if rd is not None and (nearest_d is None or rd < nearest_d):
+                    nearest, nearest_d = rect, rd
+            if nearest is not None and nearest_d <= 0.080:
+                self._pickup_rects.remove(nearest)
+                self.carrying = nearest[0]
 
     def adc_input(self, pin):
         if pin == self.mag_pin:
@@ -285,11 +302,33 @@ class World:
             return None
         return int(best * 1000)
 
-    def _ahead_hits(self, rect):
-        """ADDED (2026-10-26): does the front ToF's ray hit this box first?"""
+    def rear_distance_mm(self, max_mm=1200):
+        """ADDED (2026-10-27): rear ToF (config.REAR_TOF, at the robot's tail):
+        distance straight backwards to a box in a slot / on a pad or the table
+        edge, like front_distance_mm() but from the back of the body."""
+        b = self.spec.body_back
+        ox, oy = self.x - b * math.cos(self.th), self.y - b * math.sin(self.th)
+        dx, dy = -math.cos(self.th), -math.sin(self.th)
+        best = None
+        rects = ([r[1:] for r in self._box_rects] + [r[1:] for r in self._pickup_rects]
+                 + [(0.0, 0.0, self.track.width, self.track.length)])
+        for i, (x0, y0, x1, y1) in enumerate(rects):
+            d = _ray_box(ox, oy, dx, dy, x0, y0, x1, y1, inside_exit=(i == len(rects) - 1))
+            if d is not None and (best is None or d < best):
+                best = d
+        if best is None or best * 1000 > max_mm:
+            return None
+        return int(best * 1000)
+
+    def _ahead_distance(self, rect):
+        """ADDED (2026-10-26), CHANGED (2026-10-27): distance (m) along the
+        front ToF's ray to this box, or None if the ray misses it (it was
+        _ahead_hits(), which only said hit / miss)."""
         ox, oy = self.nose()
+        if rect[1] <= ox <= rect[3] and rect[2] <= oy <= rect[4]:
+            return 0.0          # the nose is pushed into the box (front ToF reads 15 mm then)
         dx, dy = math.cos(self.th), math.sin(self.th)
-        return _ray_box(ox, oy, dx, dy, rect[1], rect[2], rect[3], rect[4]) is not None
+        return _ray_box(ox, oy, dx, dy, rect[1], rect[2], rect[3], rect[4])
 
     def light_state(self, t_s=None):
         if self.light is None:

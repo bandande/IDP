@@ -65,12 +65,19 @@ class CrashSensor:
     """One crash switch with debouncing and short-press capture.
 
     pin: GPIO number. active_low: True for the SEN0138 (pressed -> 0 V).
-    pull: optional Pin.PULL_UP / Pin.PULL_DOWN (None: the sensor's own pull-up drives the pin).
+    pull: Pin.PULL_UP (default) / Pin.PULL_DOWN / None (no pull: only the sensor's own pull-up).
     use_irq: False disables the short-press capture (debounced polling only).
+
+    CHANGED (2026-10-27): the default pull is now Pin.PULL_UP (was None). If
+    a sensor's plug comes off, the pin used to float and could read LOW =
+    "pressed" at random - the start/stop sensor could then start the robot
+    by itself. With the internal pull-up an unplugged sensor reads
+    "released". The pull-up is parallel to the board's own pull-up, so a
+    connected sensor works exactly as before.
     """
 
     def __init__(self, pin, active_low=True, debounce_ms=15, min_press_ms=3, name="crash",
-                 use_irq=True, pull=None):
+                 use_irq=True, pull=Pin.PULL_UP):
         self.name = name
         self.min_press_us = min_press_ms * 1000
         self._active_level = 0 if active_low else 1

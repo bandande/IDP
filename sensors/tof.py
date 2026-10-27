@@ -45,7 +45,7 @@ Usage
 """
 
 from machine import Pin, I2C, SoftI2C
-from utime import ticks_ms, ticks_diff, sleep_ms
+from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us   # CHANGED (2026-10-27): + sleep_us
 
 from sensors.filters import MedianFilter
 
@@ -61,6 +61,38 @@ _REG_ADDRESS = 0x8A
 _buses = {}
 
 
+def free_bus(sda, scl):
+    """ADDED (2026-10-27): prepare the two bus pins and free a stuck bus.
+
+    1. Internal pull-ups ON for SDA and SCL. The hardware I2C driver switches
+       them on by itself, SoftI2C does NOT: its pins kept the Pico's power-up
+       pull-DOWN, which works against the sensor board's pull-ups (weaker HIGH
+       level, or no HIGH at all on a board without pull-ups).
+    2. "Bus clear" from the I2C specification: if the Pico was reset in the
+       middle of a transfer while a sensor kept its power, the sensor still
+       waits to send the rest of a byte and holds SDA LOW, and every transfer
+       fails until it is switched off and on (these boards have no XSHUT
+       pin). Up to 9 clock pulses on SCL let it finish and let go of SDA.
+    Both pins only ever pull LOW or let go (open drain), so nothing is driven
+    against a sensor. Returns a warning text if a line stays LOW (a wiring
+    fault: short to GND, sensor without power, ...), else None."""
+    sda_pin = Pin(sda, Pin.IN, Pin.PULL_UP)
+    scl_pin = Pin(scl, Pin.OPEN_DRAIN, Pin.PULL_UP, value=1)   # value 1 = let go
+    sleep_us(20)                         # let the pull-ups charge the wires
+    if scl_pin.value() == 0:
+        return "I2C SCL GP%d stays LOW with the pull-up on (short to GND? sensor not powered?)" % scl
+    for _ in range(9):
+        if sda_pin.value() == 1:
+            break
+        scl_pin.value(0)                 # one clock pulse, about 100 kHz
+        sleep_us(5)
+        scl_pin.value(1)
+        sleep_us(5)
+    if sda_pin.value() == 0:
+        return "I2C SDA GP%d stays LOW with the pull-up on (short to GND? sensor not powered?)" % sda
+    return None
+
+
 def make_i2c(i2c_id, sda, scl, freq=400000):
     """Return an I2C bus object; buses are shared between sensors on the same pins.
 
@@ -69,6 +101,13 @@ def make_i2c(i2c_id, sda, scl, freq=400000):
     key = (i2c_id, sda, scl)
     bus = _buses.get(key)
     if bus is None:
+        # ADDED (2026-10-27): pull-ups on + free a stuck bus first (see
+        # free_bus). A line that stays LOW is only reported: creating the bus
+        # still works, the sensor then fails in begin() with an OSError.
+        problem = free_bus(sda, scl)
+        if problem is not None:
+            print("WARNING: " + problem)
+        # Pin(n) without a mode keeps the pull-ups set by free_bus()
         if i2c_id is None:
             bus = SoftI2C(sda=Pin(sda), scl=Pin(scl), freq=freq)
         else:
@@ -155,9 +194,13 @@ class ToFSensor:
 
     def __init__(self, i2c, name="tof", address=DEFAULT_ADDRESS, offset_mm=0, max_valid_mm=1200,
                  median_size=3, long_range=False, stale_ms=200, require_valid_status=True,
-                 driver_factory=None):
+                 driver_factory=None, period_ms=0):
         self.i2c = i2c
         self.name = name
+        # ADDED (2026-10-27): period_ms > 0 = "timed" ranging, one measurement
+        # every period_ms (laser off in between, less heat); 0 = back-to-back.
+        self.period_ms = period_ms
+        self._last_check_ms = None    # poll(): when the sensor was last asked over I2C
         self.address = address
         self.long_range = long_range
         self.stale_ms = stale_ms
@@ -186,7 +229,7 @@ class ToFSensor:
             if self.long_range:
                 driver.set_Vcsel_pulse_period(driver.vcsel_period_type[0], 18)
                 driver.set_Vcsel_pulse_period(driver.vcsel_period_type[1], 14)
-            driver.start()
+            driver.start(self.period_ms)    # CHANGED (2026-10-27): timed mode when period_ms > 0
         except Exception as e:  # a broken or missing sensor must not stop the robot
             self.driver = None
             self.available = False
@@ -204,6 +247,13 @@ class ToFSensor:
             return False
         if now_ms is None:
             now_ms = ticks_ms()
+        # ADDED (2026-10-27): in timed mode a new result only comes every
+        # period_ms, so ask the sensor at most every period_ms / 2 (less I2C
+        # traffic; asking every 5 ms loop only found "not ready" anyway).
+        if self.period_ms and self._last_check_ms is not None \
+                and ticks_diff(now_ms, self._last_check_ms) < self.period_ms // 2:
+            return False
+        self._last_check_ms = now_ms
         try:
             self.i2c.readfrom_mem_into(self.address, _REG_INTERRUPT_STATUS, self._flag)
             if not self._flag[0] & 0x07:
@@ -313,4 +363,5 @@ def tof_from_config(driver_factory=None):
                              max_valid_mm=config.TOF_MAX_VALID_MM,
                              median_size=config.TOF_MEDIAN_SIZE,
                              long_range=config.TOF_LONG_RANGE,
-                             stale_ms=config.TOF_STALE_MS)
+                             stale_ms=config.TOF_STALE_MS,
+                             period_ms=config.TOF_PERIOD_MS)    # ADDED (2026-10-27)

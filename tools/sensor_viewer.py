@@ -23,6 +23,15 @@ zero-field baseline and detection thresholds.
 Left / Right arrow keys move the selected servo (1 / 2 selects it) while the
 grab distance, front distance and magnet readings are shown next to it, and
 positions can be saved and copied as config lines (see ServoPage).
+ADDED (2026-10-27): the same tab has a "Drop-off calibration" section. Put
+the robot by hand just after it has turned from the main line into a drop
+branch, holding a box. Up / Down drive it forward / back by the chosen step
+(50 / 100 / 200 / 500 ms at config.DROP_MOVE_SPEED), Space or s stops,
+g grabs a box from the ground and lifts it. Set servo1 (the arm) with the
+arrow keys, press "Release" to let go, then "Record": it appends the net
+forward drive time and both servo angles to drop_calibration.txt (next to
+the --record file, else in the current folder) and copies config lines
+(DROP_DRIVE_MS, DROP_SERVO1_ANGLE) to the clipboard.
 
 Command line options set the starting values, e.g. only the pin monitor and IR:
     python tools/sensor_viewer.py --line "" --crash "" --connect
@@ -257,6 +266,14 @@ def stats(values):
     mean = sum(values) / float(n)
     sd = (sum((v - mean) ** 2 for v in values) / n) ** 0.5
     return mean, sd, min(values), max(values), n
+
+
+def angle_text(angle):
+    """ADDED (2026-10-27): a servo angle reported by the Pico as text:
+    "limp" for None, else whole degrees (e.g. 160.0 -> "160")."""
+    if angle is None:
+        return "limp"
+    return "%d" % round(angle)
 
 
 def suggest_offset(raws, true_mm):
@@ -689,11 +706,26 @@ class ServoPage(tk.Frame):
     cursor. "Save position" remembers the current angles (e.g. "open",
     "closed", "lifted"); "Copy as config" puts them on the clipboard as a
     Python dict for config.py.
+
+    ADDED (2026-10-27): "Drop-off calibration" section (robot placed just
+    after its turn into a drop branch, holding a box):
+        Up / Down            drive forward / back by the selected step
+                             (Pico command "drive <ms>" / "back <ms>")
+        Space or s           stop the wheels at once ("stop")
+        g                    grab a box from the ground and lift it
+                             ("grab"; ignored while a grab is running)
+    The Pico counts the net forward drive time (forward +, back -) and
+    reports it with every sample; it is shown big. "Release" opens servo2
+    by config.GRIPPER_RELEASE_DEG, "Record" saves the net time and both
+    servo angles to drop_calibration.txt and copies config lines, "Reset
+    count" sets the Pico's count back to 0 for a new attempt.
     """
 
     STEPS = (1, 2, 5, 10)
+    DRIVE_STEPS = (50, 100, 200, 500)   # ADDED (2026-10-27): drive step choices (ms)
+    GRAB_TIMEOUT_S = 4.0                # ADDED (2026-10-27): "Grab from ground" works again after this
 
-    def __init__(self, parent, send, log):
+    def __init__(self, parent, send, log, drop_file=None):
         tk.Frame.__init__(self, parent, bg=BG, padx=8, pady=6, takefocus=1)
         self.send = send       # send(text) -> True if the command went to the Pico
         self.log = log         # log(text, tag) writes to the viewer's message box
@@ -712,6 +744,12 @@ class ServoPage(tk.Frame):
         self.goto_vars = {}    # name -> the card's "go to" field
         self.saved = []        # [(label, {name: angle}, grab mm)]
         self.grab_mm = None
+        # ADDED (2026-10-27): drop-off calibration state
+        self.drop_file = drop_file   # file "Record" appends to (None = drop_calibration.txt in the current folder)
+        self.drive_net = None        # net forward ms reported by the Pico (None = no report yet)
+        self.drive_moving = False    # the Pico reports the wheels running
+        self.drive_speed = None      # config.DROP_MOVE_SPEED as reported by the Pico (%)
+        self.grab_timer = None       # Tk after() id while a "grab" runs on the Pico
         self._build()
 
     # ------------------------------------------------------------ layout
@@ -726,6 +764,9 @@ class ServoPage(tk.Frame):
             "1 / 2 = select servo     x = limp     r = safe reset     Enter = LOCK / unlock the grab angle\n"
             "The servos are limp until the first key press, which moves the servo to the middle of its "
             "safe range (config.SERVO_SAFE_RANGE; no angle outside it is ever sent).\n"
+            # CHANGED (2026-10-27): the drop-off calibration keys share the last
+            # line (a new line would make the tab taller than the window)
+            "Drop-off:  Up / Down = drive one step   Space or s = stop   g = grab from the ground.     "
             "After typing in a field, press Enter or click a servo card to get the keys back."))
         self.help.pack(fill="x", pady=(0, 4))
 
@@ -753,14 +794,61 @@ class ServoPage(tk.Frame):
         self.grab_label.pack(anchor="w")
         self.grab_state = tk.Label(side, text="", bg=BG, font=FONT_BOLD)
         self.grab_state.pack(anchor="w")
-        tk.Label(side, text="config: box seen < %d mm, in reach <= %d mm" % (
-            config.GRAB_SEE_MM, config.GRAB_REACH_MM), bg=BG, fg="#666", font=("Segoe UI", 8)).pack(anchor="w")
-        tk.Label(side, text="front distance (%s)" % config.FRONT_TOF, bg=BG, font=FONT).pack(anchor="w", pady=(10, 0))
+        # CHANGED (2026-10-27): "in reach" now uses config.GRAB_STOP_MM (50 mm),
+        # the distance at which the pick-up really closes the gripper
+        # (control/pickup.py). It used GRAB_REACH_MM (20 mm), an old value
+        # the pick-up no longer uses.
+        tk.Label(side, text="config: box seen < %d mm, grab at <= %d mm" % (
+            config.GRAB_SEE_MM, config.GRAB_STOP_MM), bg=BG, fg="#666", font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Label(side, text="rear distance (%s)" % config.REAR_TOF, bg=BG, font=FONT).pack(anchor="w", pady=(10, 0))
         self.front_label = tk.Label(side, text="-", bg=BG, font=FONT_BIG)
         self.front_label.pack(anchor="w")
         tk.Label(side, text="magnet", bg=BG, font=FONT).pack(anchor="w", pady=(10, 0))
         self.mag_label = tk.Label(side, text="-", bg=BG, font=FONT_BIG)
         self.mag_label.pack(anchor="w")
+
+        # ADDED (2026-10-27): drop-off calibration (see drive() .. record_drop())
+        drop = tk.LabelFrame(middle, text="Drop-off calibration", bg=BG, font=FONT_BOLD, padx=10, pady=6)
+        # On the right, and given its room BEFORE the sensor column (before=side):
+        # in a narrow window the sensor column is cut, not these buttons.
+        drop.pack(side="right", fill="both", expand=True, padx=(8, 0), before=side)
+        tk.Label(drop, bg=BG, fg="#555", font=("Segoe UI", 8), justify="left", anchor="w", wraplength=330, text=(
+            "Robot just after its turn into the drop branch, holding the box.\n"
+            "Drive in steps, set servo1 (arm), Release, then Record.")).pack(anchor="w")
+        tk.Label(drop, bg=BG, font=FONT, justify="left", anchor="w", text=(
+            "Up / Down = forward / back one step\nSpace or s = stop     g = grab from ground")).pack(anchor="w", pady=(4, 0))
+        step_row = tk.Frame(drop, bg=BG)
+        step_row.pack(anchor="w", pady=(4, 0))
+        tk.Label(step_row, text="Step:", bg=BG, font=FONT_BOLD).pack(side="left")
+        self.drive_ms_var = tk.IntVar(value=100)
+        for ms in self.DRIVE_STEPS:
+            ttk.Radiobutton(step_row, text="%d ms" % ms, value=ms, variable=self.drive_ms_var,
+                            takefocus=0).pack(side="left", padx=2)
+        tk.Label(drop, text="net forward drive (Pico count)", bg=BG, font=FONT).pack(anchor="w", pady=(8, 0))
+        self.drop_net_label = tk.Label(drop, text="-", bg=BG, font=("Segoe UI", 28, "bold"))
+        self.drop_net_label.pack(anchor="w")
+        self.drop_state = tk.Label(drop, text="", bg=BG, font=FONT_BOLD)
+        self.drop_state.pack(anchor="w")
+        self.drop_info = tk.Label(drop, text="Not streaming yet.", bg=BG, fg="#666", font=("Segoe UI", 8),
+                                  justify="left", anchor="w")
+        self.drop_info.pack(anchor="w")
+        # takefocus=0 on every button here: a button with the keyboard focus
+        # would ALSO be pressed by Space (= stop).
+        buttons = tk.Frame(drop, bg=BG)
+        buttons.pack(anchor="w", pady=(6, 0))
+        ttk.Button(buttons, text="Stop", width=11, takefocus=0,
+                   command=self.drive_stop).grid(row=0, column=0, padx=2, pady=2)
+        ttk.Button(buttons, text="Release", width=11, takefocus=0,
+                   command=self.release).grid(row=0, column=1, padx=2, pady=2)
+        self.grab_btn = ttk.Button(buttons, text="Grab from ground (g)", takefocus=0, command=self.grab)
+        self.grab_btn.grid(row=0, column=2, padx=2, pady=2)
+        ttk.Button(buttons, text="Record", width=11, takefocus=0,
+                   command=self.record_drop).grid(row=1, column=0, padx=2, pady=2)
+        ttk.Button(buttons, text="Reset count", width=11, takefocus=0,
+                   command=self.reset_count).grid(row=1, column=1, padx=2, pady=2)
+        self.drop_last = tk.Label(drop, text="", bg=BG, font=("Segoe UI", 8), justify="left", anchor="w",
+                                  wraplength=270)
+        self.drop_last.pack(anchor="w", pady=(4, 0))
 
         # saved positions
         saved = tk.LabelFrame(self, text="Saved positions (double-click = move there)", bg=BG,
@@ -962,6 +1050,18 @@ class ServoPage(tk.Frame):
 
     def key(self, keysym, shift):
         """A key pressed while this tab is shown (see Viewer.on_servo_key)."""
+        # ADDED (2026-10-27): the drop-off calibration keys. They are handled
+        # first: they need no selected servo, and the last lines of this
+        # method would take any other key for "Right".
+        if keysym in ("Up", "Down"):
+            self.drive(1 if keysym == "Up" else -1)
+            return
+        if keysym in ("space", "s"):
+            self.drive_stop()
+            return
+        if keysym == "g":
+            self.grab()
+            return
         if keysym in ("1", "2"):
             index = int(keysym) - 1
             if index < len(self.names):
@@ -1033,6 +1133,133 @@ class ServoPage(tk.Frame):
         self.clipboard_append(text)
         self.log("copied to the clipboard:\n" + text)
 
+    # ------------------------------------------------- drop-off calibration
+    # ADDED (2026-10-27): the "Drop-off calibration" section. The Pico does
+    # the timing and the counting (tests/stream_sensors.py DriveSteps); this
+    # side only sends the commands and shows what the Pico reports.
+    def drive(self, sign):
+        """Up (+1) / Down (-1): drive forward / back for the selected step."""
+        if self.grab_timer is not None:
+            # the Pico reads commands only after the grab: the robot would
+            # start moving later, by surprise
+            self.log("grab still running: drive key ignored", "err")
+            return
+        word = "drive" if sign > 0 else "back"
+        if not self.send("%s %d" % (word, self.drive_ms_var.get())):
+            self.log("not connected: drive command not sent", "err")
+
+    def drive_stop(self):
+        """Space / s / "Stop" button: wheels off at once."""
+        if not self.send("stop"):
+            self.log("not connected: stop not sent", "err")
+
+    def reset_count(self):
+        """"Reset count" button: the Pico's net forward count back to 0
+        (it also stops a running move), for a new attempt."""
+        if not self.send("zero"):
+            self.log("not connected: reset not sent", "err")
+            return
+        self.drop_last.config(text="count reset to 0 - start a new attempt", fg="black")
+
+    def _unlock_for(self, what, names):
+        """"Release" and "grab" move servos on purpose, even a locked one
+        (Enter): clear the lock, it means nothing afterwards."""
+        for name in names:
+            if name in self.locked:
+                del self.locked[name]
+                self.log("%s unlocked for the %s" % (name, what))
+                self.draw(name)
+
+    def release(self):
+        """"Release" button: let go of the box (servo2 opens by
+        config.GRIPPER_RELEASE_DEG, on the Pico)."""
+        if not self.send("release"):
+            self.log("not connected: release not sent", "err")
+            return
+        self._unlock_for("release", ("servo2",))
+
+    def grab(self):
+        """g / "Grab from ground": pick a box up from the ground and lift it
+        (servo2 open, servo1 down, servo2 closed, servo1 up - on the Pico,
+        about 2.5 s). Ignored while a grab is still running: the button is
+        disabled until the Pico reports the end, at most GRAB_TIMEOUT_S."""
+        if self.grab_timer is not None:
+            self.log("grab still running - wait for it to finish", "err")
+            return
+        if not self.send("grab"):
+            self.log("not connected: grab not sent", "err")
+            return
+        self._unlock_for("grab", ("servo1", "servo2"))
+        self.grab_btn.state(["disabled"])
+        self.grab_timer = self.after(int(self.GRAB_TIMEOUT_S * 1000), self._grab_timeout)
+        self.log("grab from the ground sent (about 2.5 s)", "ev")
+
+    def _grab_timeout(self):
+        self.grab_timer = None          # this timer has fired: nothing to cancel
+        self.grab_finished()
+
+    def grab_finished(self):
+        """The grab has ended (the Pico's "grab done" / "grab refused"
+        event, the timeout, or a new stream): the button works again."""
+        if self.grab_timer is not None:
+            self.after_cancel(self.grab_timer)
+            self.grab_timer = None
+        self.grab_btn.state(["!disabled"])
+
+    def drop_path(self):
+        """The file "Record" appends to: drop_calibration.txt next to the
+        --record file, else in the current folder."""
+        if self.drop_file:
+            return self.drop_file
+        return os.path.join(os.getcwd(), "drop_calibration.txt")
+
+    def record_drop(self):
+        """"Record" button: append one line (time, net forward ms, servo1
+        and servo2 angles as reported by the Pico, drive speed) to
+        drop_calibration.txt, show it in the log and copy config lines to the
+        clipboard."""
+        if self.drive_net is None:
+            self.log("Record: no drive count from the Pico yet (connect first; "
+                     "upload the new tests/stream_sensors.py)", "err")
+            self.drop_last.config(text="nothing recorded: no drive count from the Pico yet", fg=RED)
+            return
+        if self.drive_moving:
+            self.log("Record: the robot is still moving - the count may still change", "err")
+        net = int(round(self.drive_net))
+        servo1 = self.reported.get("servo1")
+        servo2 = self.reported.get("servo2")
+        speed = "?" if self.drive_speed is None else "%d" % self.drive_speed
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        line = "%s net_forward_ms=%d servo1=%s servo2=%s speed=%s" % (
+            stamp, net, angle_text(servo1), angle_text(servo2), speed)
+        path = self.drop_path()
+        try:
+            new_file = not os.path.exists(path)
+            with open(path, "a", encoding="utf-8") as f:
+                if new_file:
+                    f.write("# drop-off calibration records (tools/sensor_viewer.py, Grab / Servo tab)\n")
+                f.write(line + "\n")
+        except OSError as e:
+            self.log("Record: could not write %s: %s" % (path, e), "err")
+            self.drop_last.config(text="NOT saved: %s" % e, fg=RED)
+            return
+        config_lines = [
+            "# drop-off calibration recorded %s (servo2 %s deg, DROP_MOVE_SPEED %s %%)"
+            % (stamp, angle_text(servo2), speed),
+            "DROP_DRIVE_MS = %d  # net forward drive from the turn into the branch" % net,
+        ]
+        if servo1 is None:
+            config_lines.append("# DROP_SERVO1_ANGLE = ?  # servo1 was limp when recorded")
+        else:
+            config_lines.append("DROP_SERVO1_ANGLE = %s  # arm angle before letting go" % angle_text(servo1))
+        text = "\n".join(config_lines)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.log("drop-off recorded in %s:\n%s\ncopied to the clipboard:\n%s" % (path, line, text), "ev")
+        self.drop_last.config(fg="#1e8449", text="recorded: net %+d ms, servo1 %s, servo2 %s\nsaved in %s, "
+                                                 "config lines copied" % (net, angle_text(servo1),
+                                                                          angle_text(servo2), path))
+
     # ------------------------------------------------------------ data in
     def on_hello(self, h):
         servos = h.get("servo")
@@ -1074,12 +1301,49 @@ class ServoPage(tk.Frame):
                 self.no_servo.pack(padx=10, pady=20)
         for n in names:
             self.draw(n)
+        # ADDED (2026-10-27): drop-off calibration. A new stream starts its
+        # net forward count at 0, and no grab is running any more.
+        drive = h.get("drive")             # [speed %, longest step ms] or None (old Pico code)
+        self.drive_net = None
+        self.drive_moving = False
+        self.drive_speed = drive[0] if drive else None
+        self.drop_net_label.config(text="-")
+        self.drop_state.config(text="")
+        if drive is None:
+            self.drop_info.config(text="The Pico code has no drive commands:\n"
+                                       "upload the new tests/stream_sensors.py", fg=RED)
+        else:
+            self.drop_info.config(text="speed %d %% (config.DROP_MOVE_SPEED), at most %d ms per step;\n"
+                                       "the count starts at 0 with every stream" % (drive[0], drive[1]), fg="#666")
+        self.grab_finished()
 
     def on_sample(self, m):
         for name, angle in m.get("servo", []):
             if self.reported.get(name, "?") != angle:
                 self.reported[name] = angle
                 self.draw(name)
+        # ADDED (2026-10-27): drop-off calibration - the Pico's net forward count
+        drive = m.get("drive")             # [net forward ms, moving]
+        if drive is not None:
+            self.drive_net = drive[0]
+            self.drive_moving = bool(drive[1])
+            self.drop_net_label.config(text="%+d ms" % drive[0])
+            self.drop_state.config(text="MOVING" if self.drive_moving else "standing",
+                                   fg=AMBER if self.drive_moving else "#1e8449")
+        for ev in m.get("ev", []):
+            if ev.startswith("grab done") or ev.startswith("grab refused"):
+                self.grab_finished()
+            # After a grab / release the arrow keys must step on from the
+            # angle the servo has NOW (this sample's angles are after the move).
+            moved = ()
+            if ev.startswith("grab done"):
+                moved = ("servo1", "servo2")
+            elif ev.startswith("release:"):
+                moved = ("servo2",)
+            for name in moved:
+                if self.reported.get(name) is not None:
+                    self.target[name] = self.reported[name]
+                    self.draw(name)
         for row in m.get("tof", []):
             name, available, mm = row[:3]
             text = "n/a" if not available else ("no target" if mm is None else "%d mm" % mm)
@@ -1088,13 +1352,13 @@ class ServoPage(tk.Frame):
                 self.grab_label.config(text=text)
                 if self.grab_mm is None:
                     self.grab_state.config(text="", fg="black")
-                elif self.grab_mm <= config.GRAB_REACH_MM:
+                elif self.grab_mm <= config.GRAB_STOP_MM:    # CHANGED (2026-10-27): was GRAB_REACH_MM
                     self.grab_state.config(text="IN REACH", fg="#1e8449")
                 elif self.grab_mm < config.GRAB_SEE_MM:
                     self.grab_state.config(text="box seen", fg=AMBER)
                 else:
                     self.grab_state.config(text="nothing close", fg="#777")
-            elif name == config.FRONT_TOF:
+            elif name == config.REAR_TOF:      # CHANGED (2026-10-27): was FRONT_TOF
                 self.front_label.config(text=text)
         mag = m.get("mag")
         if mag:
@@ -1147,6 +1411,11 @@ class Viewer(tk.Tk):
         self.record = None
         if options is not None and options.record:
             self.record = open(options.record, "a", encoding="utf-8")
+        # ADDED (2026-10-27): the drop-off calibration's "Record" writes
+        # drop_calibration.txt next to the --record file (None = current folder).
+        self.drop_file = None
+        if options is not None and options.record:
+            self.drop_file = os.path.join(os.path.dirname(os.path.abspath(options.record)), "drop_calibration.txt")
         self.last_sample = 0.0
         self.monitor = []
         self.pin_lamps = []
@@ -1224,17 +1493,21 @@ class Viewer(tk.Tk):
         self.mag_page = MagPage(self.notebook)
         self.notebook.add(self.mag_page, text="  Magnetic  ")
         # ADDED (2026-10-23): gripper calibration tab (servos on the arrow keys).
-        self.servo_page = ServoPage(self.notebook, self.send_command, self.write_log)
+        # CHANGED (2026-10-27): drop_file = where the drop-off calibration's "Record" writes
+        self.servo_page = ServoPage(self.notebook, self.send_command, self.write_log, drop_file=self.drop_file)
         self.notebook.add(self.servo_page, text="  Grab / Servo  ")
         # The keys are bound on the window AND on the notebook: when the notebook
         # (the row of tabs) has the keyboard focus, its own Left / Right binding
         # would switch tabs; the notebook binding runs first and stops that while
         # the servo tab is shown.
+        # ADDED (2026-10-27): Up / Down / Space / s / g for the drop-off calibration.
         for key in ("<Left>", "<Right>", "<Shift-Left>", "<Shift-Right>", "<Key-1>", "<Key-2>", "<Key-x>", "<Key-r>",
-                    "<Return>", "<KP_Enter>"):
+                    "<Return>", "<KP_Enter>", "<Up>", "<Down>", "<space>", "<Key-s>", "<Key-g>"):
             self.bind(key, self.on_servo_key)
             self.notebook.bind(key, self.on_servo_key)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+        # ADDED (2026-10-27): see on_click_release (Space must not press a clicked button again)
+        self.bind("<ButtonRelease-1>", self.on_click_release, add="+")
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(2, weight=1)
@@ -1384,7 +1657,8 @@ class Viewer(tk.Tk):
 
     def on_servo_key(self, event):
         """ADDED (2026-10-23): arrow / 1 / 2 / x keys for the Grab / Servo tab.
-        Ignored on the other tabs and while a text field has the cursor."""
+        Ignored on the other tabs and while a text field has the cursor.
+        CHANGED (2026-10-27): also Up / Down / Space / s / g (drop-off calibration)."""
         if self.notebook.select() != str(self.servo_page):
             return None
         focus = self.focus_get()
@@ -1398,6 +1672,21 @@ class Viewer(tk.Tk):
         # opened, so the arrow keys go to the servos and not to a text field.
         if self.notebook.select() == str(self.servo_page):
             self.after(20, self.servo_page.focus_set)
+
+    def on_click_release(self, event):
+        """ADDED (2026-10-27): a clicked button (or check box, list) keeps the
+        keyboard focus, and Space - "stop" on the Grab / Servo tab - would
+        then press it AGAIN (e.g. Apply, Disconnect, Move there). So after
+        such a click on that tab the focus goes back to the tab itself.
+        Text fields keep their focus (typing must still work)."""
+        if self.notebook.select() != str(self.servo_page):
+            return
+        try:
+            kind = event.widget.winfo_class()
+        except (tk.TclError, AttributeError):
+            return          # the widget is gone, or is an internal Tk widget
+        if kind in ("TButton", "Button", "TCheckbutton", "TRadiobutton", "Listbox"):
+            self.servo_page.focus_set()
 
     def on_close(self):
         self.disconnect()
@@ -1446,6 +1735,10 @@ class Viewer(tk.Tk):
             pass
         if latest is not None:
             self.last_sample = time.time()
+            # ADDED (2026-10-27): samples are back after a pause (the Pico
+            # sends none during the ~2.5 s "grab"): clear the "no data" warning
+            if self.status.cget("text").startswith("no data"):
+                self.status.config(text="streaming", fg="#1e8449")
             self.on_sample(latest)
         if self.link is not None and time.time() - self.last_sample > 2.0:
             self.status.config(text="no data - is the code uploaded? see messages", fg=RED)
@@ -1604,7 +1897,9 @@ def main():
     parser.add_argument("--mag", help='magnetic sensor GP (an ADC pin shows the voltage); "" = off')
     parser.add_argument("--tab", choices=("overview", "tof", "mag", "servo"), default="overview",
                         help="tab shown first (servo = Grab / Servo calibration, added 2026-10-23)")
-    parser.add_argument("--record", help="append every line received from the Pico to this file")
+    # CHANGED (2026-10-27): the help also says where drop_calibration.txt goes
+    parser.add_argument("--record", help="append every line received from the Pico to this file "
+                                         "(the drop-off calibration's drop_calibration.txt goes in the same folder)")
     # ADDED (2026-10-26)
     parser.add_argument("--servo-free", action="store_true",
                         help="servo CALIBRATION mode: ignore the safe ranges / resets in config.py "

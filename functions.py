@@ -11,6 +11,13 @@ from actuators.servo import Servo
 import MAP
 import sensors.line_sensor as line_sensor
 from control.start_stop import StartStopButton
+# ADDED (2026-10-27): the pick-up sequence (red / green box) and the
+# gripper helpers now live in their own modules, so the bench calibration
+# test (tests/test_pickup.py) runs exactly the same code as the robot.
+from control.pickup import PickUp
+from control.dropoff import release_and_push     # ADDED (2026-10-27): let go + push the box in
+from control.dropoff import drive_in_and_drop    # ADDED (2026-10-27): drive into the branch, then the above
+from actuators.gripper import gripper_end, gripper_carry, gripper_start, grab_box, release_box
 
 
 def degrees_to_time(degrees):
@@ -60,19 +67,18 @@ def direction_to_turn(current_direction, target_direction):
     else:
         return "left"
 
-def reset_map(old_phrases=["COLLECTED", "OCCUPIED"]):
-    # Read in the file
-    with open('MAP.py', 'r') as file:
-        filedata = file.read()
+def reset_map(old_phrases=("COLLECTED", "OCCUPIED")):
+    # FIX (2026-10-27): reset the map in RAM only. The old version rewrote
+    # MAP.py on the flash at EVERY start. If the power dipped or the program
+    # was interrupted during that write, MAP.py was left broken and the next
+    # start crashed at "from MAP import MAP" (OSError: 84 on the Pico on
+    # 2026-10-23). The robot code never writes the map back to the file
+    # anyway - it only changes the node types in memory while it runs - so
+    # setting them back in memory does the same job without touching flash.
+    for node in MAP.MAP.values():
+        if node.get("type") in old_phrases:
+            node["type"] = "DEAD_END"
 
-    # Replace the target string
-    for old_phrase in old_phrases:
-        filedata = filedata.replace(old_phrase, "DEAD_END")
-
-    # Write the file out again
-    with open('MAP.py', 'w') as file:
-        file.write(filedata)
-        
 
     
 
@@ -406,49 +412,8 @@ def update_sensors(variables):
 
 
 
-# ADDED (2026-10-26, test build): the gripper, from our branch (xz-dev).
-# Both servos only ever move inside config.SERVO_SAFE_RANGE, one degree at a
-# time (Servo.move_slowly), and a servo with no pulses is only started with
-# its safe reset (straight to the middle of its range).
-def gripper_end(servo, end):
-    """The angle of the "low" or "high" end of a servo's safe range."""
-    return servo.low if end == "low" else servo.high
-
-
-def gripper_carry(servo1, servo2):
-    """Gripper to its carry pose (config.GRIPPER_CARRY: servo1 up, servo2
-    open), servo1 first so the arm is up before the gripper opens."""
-    for name, servo in (("servo1", servo1), ("servo2", servo2)):
-        servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "high")), config.GRIPPER_STEP_MS)
-
-
-def gripper_start(servo1, servo2):
-    """First gripper movement after the start press: safe reset of both
-    servos (their position is unknown), then the carry pose."""
-    for servo in (servo1, servo2):
-        servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
-    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
-    gripper_carry(servo1, servo2)
-    print("gripper ready: servo1 %s deg, servo2 %s deg" % (servo1.angle(), servo2.angle()))
-
-
-def grab_box(servo1, servo2):
-    """Pick the box up, standing in front of it: servo1 down to its low end,
-    servo2 down to its low end (gripper closes), servo1 up to its high end."""
-    for servo, end, what in ((servo1, "low", "arm down"), (servo2, "low", "gripper closed"),
-                             (servo1, "high", "arm up")):
-        servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
-        print("gripper: %s (%s deg)" % (what, servo.angle()))
-        utime.sleep_ms(config.GRIPPER_PAUSE_MS)
-
-
-def release_box(servo2):
-    """Let go of the box: servo2 opens by config.GRIPPER_RELEASE_DEG."""
-    if servo2.angle() is None:
-        return
-    servo2.move_slowly(servo2.angle() + config.GRIPPER_RELEASE_DEG, config.GRIPPER_STEP_MS)
-    print("gripper: released (servo2 %s deg)" % servo2.angle())
-    utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+# CHANGED (2026-10-27): gripper_end, gripper_carry, gripper_start, grab_box
+# and release_box moved to actuators/gripper.py (imported at the top).
 
 
 def wait_for_start(button):
@@ -621,8 +586,19 @@ def robot_mode_check(variables, now):
                 robot.queue = robot.queue[:-2]+[robot.queue[-1]]
                 print(robot.queue)
                         
+            # ADDED (2026-10-27): Prevent driving on into the drop branch.
+            # Like the pick-up above: from a drop JUNCTION into its DROP slot
+            # (a dead end) only the turn is kept; the "drop_off" mode then
+            # starts right after the turn and drives in itself for
+            # config.DROP_DRIVE_MS (measured from the turn, see config.py).
+            if ("DROP" in next_item and not next_item.startswith("JUNCTION")
+                and robot.position.startswith("JUNCTION")):
+                # Remove straight
+                robot.queue = robot.queue[:-2]+[robot.queue[-1]]
+                print(robot.queue)
+
             # Prevent moving forwards when picking up the box.
-            if (bool(re.match(r"^JUNCTION.*DROP",next_item)) 
+            if (bool(re.match(r"^JUNCTION.*DROP",next_item))
                 and ("DROP" in robot.position and not robot.position.startswith("JUNCTION"))):
                 # Remove straight
                 robot.queue = robot.queue[:-2]+[robot.queue[-1]]
@@ -653,24 +629,25 @@ def robot_mode_check(variables, now):
             if next_item == "collect":
                 # Plan collection point
                 # Find collection point route and enter. include "pick_up"     
-                for key in map.keys():
-                    
-                    if key.startswith("GREEN_"):
-                        if map[key]["type"]=="DEAD_END":
-                            robot.drop_off_info[0]=0
-                            robot.final_objective=key
-                        
-                            break
-                    if key.startswith("RED_"):
-                        if map[key]["type"]=="DEAD_END":
-                            robot.drop_off_info[0]=1
-                            robot.final_objective=key
-                                    
-                            break
+                # CHANGED (2026-10-27): look at the boxes in a FIXED order
+                # (config.PICKUP_ORDER). The old loop went through map.keys(),
+                # whose order MicroPython does not keep, so the box chosen was
+                # effectively random (on the robot it went to GREEN_2 first).
+                # GREEN boxes are delivered on the LEFT side (drop_off_info[0]
+                # = 0), RED boxes on the RIGHT side (1), as before.
+                for key in config.PICKUP_ORDER:
+                    if map[key]["type"]=="DEAD_END":
+                        robot.drop_off_info[0] = 0 if key.startswith("GREEN_") else 1
+                        robot.final_objective=key
+                        break
                 else:
-                    for key in map.keys():
-                        if key.startswith(("GREEN_","RED_")):
-                            map[key]["type"]="DEAD_END"
+                    # All boxes collected: mark them free again, as before.
+                    # FIX (2026-10-27): the old line used
+                    # key.startswith(("GREEN_","RED_")) - a tuple argument,
+                    # which MicroPython's str.startswith does not accept (it
+                    # would have crashed here once every box was taken).
+                    for key in config.PICKUP_ORDER:
+                        map[key]["type"]="DEAD_END"
                     robot.queue.append("collect")
                     robot.mode=""
                             
@@ -886,178 +863,59 @@ def robot_mode_check(variables, now):
                                 
                                 
     elif robot.mode == "pick_up":
-        # CHANGED (2026-10-26, test build): the real pick-up (was a 2 s wait).
-        # First loop: gripper to its carry pose (open) and drive on slowly.
-        # Every loop after that: steer along the line while the two centre
-        # sensors see it; when the FRONT distance sensor reads
-        # config.GRAB_STOP_MM or less (or after config.GRAB_APPROACH_MAX_MS),
-        # stop, pick the box up (servo1 down, servo2 closed, servo1 up),
-        # read its magnet and go on with the route.
-        # if not picking_up:
-        #     picking_up=True
-        #     robot.previous_position=robot.position
-        #     robot.position=robot.objective
-        #     print("GRABBING STUFF: driving up to the box")
-        #     gripper_carry(servo1, servo2)
-        #     robot.forward(motor3, motor4, config.GRAB_APPROACH_SPEED, config.GRAB_APPROACH_SPEED)
-        #     time_count = now + config.GRAB_APPROACH_MAX_MS
-        # else:
-        #     distance = tasks.front_distance_now()
-        #     close = distance is not None and distance <= config.GRAB_STOP_MM
-        #     if not close and now < time_count:
-        #         left_speed = right_speed = config.GRAB_APPROACH_SPEED
-        #         if robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
-        #             left_speed -= config.GRAB_STEER       # line to the left: turn left
-        #         elif robot.front_right_sensor == 1 and robot.front_left_sensor == 0:
-        #             right_speed -= config.GRAB_STEER      # line to the right: turn right
-        #         robot.forward(motor3, motor4, left_speed, right_speed)
-        #     else:
-        #         robot.stop(motor3, motor4)
-        #         if close:
-        #             print("box %d mm in front - picking it up" % distance)
-        #         else:
-        #             print("WARNING: no box within %d mm after %d ms - picking up anyway"
-        #                   % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
-        #         grab_box(servo1, servo2)
-        #         pole = tasks.read_pole()
-        #         level = tasks.level_for_pole(pole)
-        #         robot.drop_off_info[1] = 1 if level == "TOP" else 0
-        #         print("box magnet: %s (strongest field %s mV) -> %s level" % (
-        #             pole if pole else "NOT FOUND", tasks.last_field_mv, level))
-        #         map[robot.final_objective]["type"]="COLLECTED"
-        #         robot.has_box=True
-        #         picking_up=False
-        #         robot.mode=""
-        
-                
+        # CHANGED (2026-10-27): the pick-up is now control/pickup.py's PickUp
+        # sequence (the partner's scan-and-reverse draft that was here never
+        # finished: it set mode_extra_specific to "return turn" but tested for
+        # "return_turn", and it grabbed even when it saw no box).
+        # It starts right after the robot has turned from the main line into
+        # the red / green box: follow the box's line to its white cross line
+        # (all four sensors white), straight on until the front distance
+        # sensor reads config.GRAB_STOP_MM, grab (servo1 down, servo2 closed,
+        # servo1 up), U-turn, follow the line back to the main line and stop
+        # there. See control/pickup.py and the PICKUP_... settings in config.py.
         if not picking_up:
-                        #Do some actual grabbing stuff etc
-            robot.previous_position=robot.position
-            robot.position=robot.objective
-            print(robot.position)
-            utime.sleep(1)
-            print("GRABBING STUFF")
-            # Turning hasn't started, do the turns
             picking_up=True
-            robot.mode_extra_specific="scan"
-                        
-                        
-            readings = [10000 for i in range(10)]
-            time_count=now+c.SCAN_TURN_TIME
-            scantime=now
-            robot.spin(motor3, motor4, "left", 50)
-                        
-    
-        elif robot.mode_extra_specific=="scan":
-            
-            if now>=time_count and motor3.return_state()==-1:
-                time_count+=c.SCAN_TURN_TIME*2
-                print("timecount:" +str(time_count))
-                print(now)
-                robot.spin(motor3, motor4, "right", 50)
-                print("spinning_left")
-            elif now>=time_count and motor3.return_state()==1:
-                time_count+=c.SCAN_TURN_TIME*2
-                robot.spin(motor3, motor4, "left", 50)
-                print("spinning_right")
-                        
-            if now%5==0:
-                if tasks.front_tof.poll():
-                    d = tasks.front_tof.get_distance()
-                    if d is not None:
-                        readings.append(d)
-                read=readings[-10:]
-                read.sort()
-                mean_scan=read[5]
-                if mean_scan<c.DISTANCE_TO_SCAN_PICK_UP:
-                    print("interruppted")
-                    print(mean_scan)
-                    scantime=now-scantime
-                    robot.mode_extra_specific="move_straight"
-                    robot.forward(motor3,motor4,60,60)
-                    movetime=now
-                    time_count=now+1000
-                    mean_scan=1000000
-                                
-                                
-        elif robot.mode_extra_specific=="move_straight":
-            
-            if now>=time_count and motor3.return_state()==1:
-                print("Go forwards")
-                time_count+=1000
-                robot.forward(motor3,motor4,60, 60, reverse=True)
-            elif now>=time_count and motor3.return_state()==-1:
-                print("Go backwards")
-                # Go back to scan if see nothing
-                robot.mode_extra_specific="scan"
-                robot.spin(motor3, motor4, "left", 50)
-                time_count=now+c.SCAN_TURN_TIME
-            
-            if tasks.front_tof.poll():
-                d = tasks.front_tof.get_distance()
-                if d is not None:
-                    readings.append(d)
-                read=readings[-10:]
-                read.sort()
-                mean_scan=read[5]
-                        
-            if mean_scan<c.DISTANCE_TO_PICK_UP:
-                print("Scanned")
-                movetime=now-movetime
-                robot.mode_extra_specific="pick_up_grab_start"
-                robot.stop(motor3,motor4)
-                    
-        elif robot.mode_extra_specific=="pick_up_grab_start":
-            pole = tasks.read_pole()
-            if pole:
-                level = tasks.level_for_pole(pole)
+            robot.previous_position=robot.position
+            robot.position=robot.objective          # in the box (e.g. GREEN_1)
+            # the U-turn spins away from the neighbouring box (config)
+            robot.pickup = PickUp(robot, motor3, motor4, servo1, servo2, tasks,
+                                  config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left"))
+            robot.pickup.start(now)
+        elif robot.pickup.update(now):
+            picking_up=False
+            if robot.pickup.ok:
+                # Back on the main line, at the box's junction, facing the
+                # way it came in reversed (the U-turn). The next route
+                # starts from this junction; the next turn first drives
+                # NODE_FORWARD_MS so the wheels get onto the junction, exactly
+                # as after any junction found while driving straight.
+                # CHANGED (2026-10-27): the box's magnet was already read by
+                # the pick-up sequence right after the grab (robot.pickup.pole)
+                # - no second reading here.
+                level = robot.pickup.level
                 robot.drop_off_info[1] = 1 if level == "TOP" else 0
-                print("box magnet: %s (strongest field %s mV) -> %s level" % (
-                pole if pole else "NOT FOUND", tasks.last_field_mv, level))
-            else:
-                # In case it can't see it
-                print("CANT SEE")
-                robot.mode="move_straight"
-                robot.forward(motor3,motor4,60, 60)
-                time_count=now+500
-                pass
-        
-            grab_box(servo1, servo2)
-                        
-                        # Do the whole servo grabbing motion
-            robot.mode_extra_specific="return_straight"
-            time_count=now+movetime%500
-            robot.forward(motor3,motor4, 60, 60, reverse=True)
-                        
-        elif robot.mode_extra_specific=="return_straight":
-            if now>=time_count:
-                robot.mode_extra_specific="return turn"
-                time_count=now+scantime%c.SCAN_TURN_TIME
-                if scantime%(c.SCAN_TURN_TIME*4)+c.SCAN_TURN_TIME<c.SCAN_TURN_TIME*2:
-                    robot.spin(motor3,motor4,"right", 50)
-                else:
-                    robot.spin(motor3,motor4,"left", 50)
-        elif robot.mode_extra_specific=="return_turn":  
-            if now>=time_count:
                 map[robot.final_objective]["type"]="COLLECTED"
-                robot.mode=""
                 robot.has_box=True
-                picking_up=False
-                    
-                    # This should have the grabbing and so on code
-                    # robot.drop_off_info[1]=0
-                    # CHANGED (2026-10-20): the fixed 0 above was a placeholder for
-                    # the rack level. The level now comes from the magnet in the
-                    # box: read_pole() watches the magnet sensor for
-                    # config.MAG_READ_MS and returns "north", "south" or None;
-                    # config.MAG_POLE_LEVEL turns that into "TOP" / "BOTTOM"
-                    # (MAG_NO_POLE_LEVEL if no magnet was found). "deliver" reads
-                    # drop_off_info[1]: 0 -> BOTTOM_ slots, 1 -> TOP_ slots.
-                    
-                    
-                        
-                
-                    
+                robot.previous_position=robot.position
+                robot.position="JUNCTION_" + robot.final_objective
+                robot.direction=turn_to_direction(robot.direction, "about")
+                robot.mode=""
+                # ADDED (2026-10-27): for now the robot only REPORTS the pole
+                # and stops on the main line after the U-turn (it does not
+                # yet turn left / right because of it). A press of the button
+                # goes on with the route.
+                if config.STOP_AFTER_PICKUP:
+                    robot.stop(motor3, motor4)
+                    is_started=False
+                    print("STOP_AFTER_PICKUP: box magnet %s -> %s level; stopped on the main line"
+                          " - press the button to go on" % (robot.pickup.pole, level))
+            else:
+                # Something went wrong (no cross line, no box, ...): the
+                # sequence has stopped the motors. Stop the run here so a
+                # person can look; a press of the button goes on.
+                print("PICK-UP FAILED: %s - stopped, press the button to go on" % robot.pickup.message)
+                is_started=False
+                robot.mode=""
     elif robot.mode == "drop_off":
                     #Do some actual dropping off stuff etc
         utime.sleep(2)
@@ -1071,8 +929,16 @@ def robot_mode_check(variables, now):
         robot.mode=""
         # ADDED (2026-10-26, test build): open servo2 a little to let go of
         # the box, then stop (config.STOP_AFTER_DROP; a press goes on).
+        # CHANGED (2026-10-27): after letting go, back off, close the gripper
+        # to config.SERVO_PUSH_ANGLE, push the box in, back out and open the
+        # gripper again (control/dropoff.py release_and_push).
+        # CHANGED (2026-10-27): the drop-off now starts right after the turn
+        # into the drop branch (see "Prevent driving on into the drop branch"
+        # above): arm to config.DROP_SERVO1_ANGLE, follow the branch's line
+        # for config.DROP_DRIVE_MS, then let go and push
+        # (control/dropoff.py drive_in_and_drop; values from the calibration).
         robot.stop(motor3, motor4)
-        release_box(servo2)
+        drive_in_and_drop(robot, motor3, motor4, servo1, servo2, line=sensors)   # follows the branch's line
         if config.STOP_AFTER_DROP:
             is_started=False
             print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")

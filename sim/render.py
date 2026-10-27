@@ -115,6 +115,10 @@ def draw_run(track, world, notes, png, title=""):
     _robot_outline(ax, world, world.x, world.y, world.th, "#ff4757")
     for name, x0, y0, x1, y1 in getattr(world, "_box_rects", []):
         ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, color="#c8a165", ec="black", zorder=6))
+    # ADDED (2026-10-27): the boxes still waiting on the pick-up pads (a box
+    # the robot has taken is no longer drawn there; see the title / notes)
+    for name, x0, y0, x1, y1 in getattr(world, "_pickup_rects", []):
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fc="#c8a165", ec="black", lw=0.8, zorder=6))
     for pad in track.pads:
         pole = getattr(world, "pad_poles", {}).get(pad["name"])
         if pole:
@@ -127,6 +131,8 @@ def draw_run(track, world, notes, png, title=""):
     extra = ""
     if getattr(world, "light", None):
         extra = "   [traffic light %gs red / %gs green]" % world.light[:2]
+    if getattr(world, "carrying", None):        # ADDED (2026-10-27)
+        extra += "   [holding the %s box]" % world.carrying
     ax.set_title((title or "simulated run") + extra, fontsize=9)
     axt.axis("off")
     lines = ["green outline = start, red outline = end; thick = rear axle path,",

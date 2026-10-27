@@ -27,7 +27,7 @@ to be measured.
 | Sensor | Count | Code | Tested on the robot |
 |---|---|---|---|
 | Line tracking, DFRobot SEN0017 | 4 | `sensors/line_sensor.py`, `sensors/line_processing.py` | 2 sensors worked on temporary pins; re-test on the final pins |
-| Distance (ToF), VL53L0X | 2 | `sensors/tof.py` | one sensor worked on GP8/GP9 earlier (6 min, 0 I2C errors, about 35 readings/s, 24-829 mm); re-test as dist1 / dist2 on the final pins |
+| Distance (ToF), VL53L0X | 2 | `sensors/tof.py` | one sensor worked on GP8/GP9 earlier (6 min, 0 I2C errors, about 35 readings/s, 24-829 mm); re-test as dist1 (grab, front) / dist2 (rear) on the pins of 2026-10-27 |
 | Crash, DFRobot SEN0138 L/R | 2 | `sensors/crash.py` | yes, on physical 11 / 12; re-check which lever is left (final schematic: L = 12, R = 11) |
 | IR receiver, Vishay TSOP4838 | 1 | `sensors/ir_receiver.py` | yes, on physical 19: 1 Hz IR beacon (500 ms on / 500 ms off) received, no false frames |
 | Magnetic (Hall, analog output) | 1 | `sensors/magnetic.py` | yes, on GP26; analog, thresholds set |
@@ -65,8 +65,8 @@ Software on the laptop
 | `motor.py`, `constants.py` | Pico | the team's `Motor` class (DIR + PWM) and constants |
 | `config.py` | Pico | every pin and sensor setting, including the task sensors; `validate()` (errors), `warnings()` (pins to check), `physical_pin(gp)` |
 | `sensors/` | Pico | one module per sensor: hardware interface + data processing |
-| `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `servo.py` (gripper servos), `leds.py` (yellow / red / green LEDs) |
-| `control/` | Pico | `task_sensors.py` (magnet pole, slot check, traffic light), `start_stop.py` (crash sensor as start / stop button), `line_follower.py` (backup line follower for the bench test) |
+| `actuators/` | Pico | `motor.py` (drive motors, `DriveBase`), `servo.py` (gripper servos), `gripper.py` (gripper moves: start, grab, release), `leds.py` (yellow / red / green LEDs) |
+| `control/` | Pico | `task_sensors.py` (magnet pole, slot check, traffic light), `pickup.py` (pick-up sequence), `dropoff.py` (let go + push the box in), `start_stop.py` (crash sensor as start / stop button), `line_follower.py` (backup line follower for the bench test) |
 | `sim/` | PC | the simulator: runs the robot code unchanged on a simulated table (see "Simulator" below). Do not upload. |
 | `libs/VL53L0X.py` | Pico | VL53L0X driver from the department template (unchanged) |
 | `tests/test_*.py` | Pico | on-robot test scripts, one per sensor, numbered in the recommended order |
@@ -89,8 +89,10 @@ Sensor modules
 | `actuators/leds.py` | `StatusLeds.from_config()`, `.set("green", True)`, `.show(red=True)`, `.off()` |
 | `control/line_follower.py` | `LineFollower.from_config()`, `.start(plan=None)`, `.update(bits)` -> (left, right), `.stop()`, `.state`, `.reason` |
 | `control/start_stop.py` | `StartStopButton.from_config()`, `.pressed()` (True once per press) |
-| `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()` (front sensor), `.box_distance_now()` / `.box_distance()` -> mm or None, `.box_seen(d)`, `.box_in_reach(d)` (grab sensor), `.light_reset()`, `.light_update()` -> "red" / "green"; the two distance sensors themselves are `.front_tof` and `.grab_tof` |
-| `actuators/servo.py` | `Servo(pin)`, `.set_angle(deg)` (0-270), `.angle()` (last angle set), `.off()` |
+| `control/task_sensors.py` | `TaskSensors.from_config()`, `.calibrate()`, `.read_pole()` -> "north" / "south" / None, `.level_for_pole()`, `.slot_occupied()` / `.rear_distance_now()` (rear sensor), `.box_distance_now()` / `.box_distance()` -> mm or None, `.box_seen(d)`, `.box_in_reach(d)` (grab sensor), `.light_reset()`, `.light_update()` -> "red" / "green"; the two distance sensors themselves are `.rear_tof` and `.grab_tof` |
+| `actuators/servo.py` | `Servo(pin)` (safe range from `config.SERVO_SAFE_RANGE`), `.reset()` (required first move, waits until there), `.set_angle(deg)` / `.move_slowly(deg)` (clamped into the safe range), `.angle()` (last angle set), `.off()` |
+| `control/pickup.py` | `PickUp(robot, motor3, motor4, servo1, servo2, tasks, uturn_direction)`, `.start(now_ms)`, `.update(now_ms)` -> True when finished, `.ok`, `.phase`, `.message`, `.pole` / `.level` (box magnet) |
+| `control/dropoff.py` | `release_and_push(robot, motor3, motor4, servo1, servo2)` -> True when done |
 
 ### The main program (`main.py`)
 
@@ -122,21 +124,26 @@ them out. Changes of 2026-10-20, all marked in the code:
 - **Task sensors** (`control/task_sensors.py`, settings in `config.py`):
   - at `pick_up` the magnet pole decides the level (`drop_off_info[1]`,
     TOP / BOTTOM drops);
-  - after turning into a drop slot, `check_slot` looks into it with the
-    front distance sensor; a full slot is marked `OCCUPIED` and the next one
-    is planned (all full -> reset, as before);
+  - after turning into a drop slot, `check_slot` looks into it with a
+    distance sensor (CHANGED 2026-10-27: now the REAR sensor, the robot
+    reverses into the slot); a full slot is marked `OCCUPIED` and the next
+    one is planned (all full -> reset, as before);
   - before driving up the ramp (START -> TOP_CENTRE) the robot waits for the
     traffic light (`wait_light`, IR beacon = green, no time limit).
 - **Gripper** (2026-10-26, settings in `config.py` under "Gripper servos"):
   - after the start press both servos are reset the safe way (straight to
     the middle of their safe range) and go slowly to the carry pose (servo1
     up, servo2 open);
-  - `pick_up`: after turning into the red / green pick-up box the robot
-    drives on slowly (steering along the line while it sees one) until the
-    FRONT distance sensor reads `GRAB_STOP_MM` (50 mm), then servo1 down,
-    servo2 closed, servo1 up, reads the box magnet and goes on with the route;
-  - `drop_off`: servo2 opens by `GRIPPER_RELEASE_DEG`; with `STOP_AFTER_DROP`
-    the robot then stops (a button press goes on);
+  - `pick_up` (CHANGED 2026-10-27: `control/pickup.py`): after turning into
+    the red / green pick-up box the robot follows its line to the white cross
+    line, drives on straight until the GRAB distance sensor reads
+    `GRAB_STOP_MM` (50 mm), then servo1 down, servo2 closed, servo1 up,
+    reads the box magnet, turns round and follows the line back to the main
+    line (see Step 11);
+  - `drop_off` (CHANGED 2026-10-27: `control/dropoff.py`): servo2 opens by
+    `GRIPPER_RELEASE_DEG`, the robot backs off, closes the gripper to
+    `SERVO_PUSH_ANGLE`, pushes the box in and backs out; with
+    `STOP_AFTER_DROP` the robot then stops (a button press goes on);
   - servo safe ranges (new gripper): servo1 155-173, servo2 130-171 deg. No
     angle outside them is ever sent, every movement is one degree at a time,
     and a servo with no pulses only starts with its safe reset.
@@ -159,7 +166,8 @@ The simulator runs the robot code **unchanged** on a simulated table built
 from `sim/track_map.py` (the table with positions in metres; the robot
 itself uses `MAP.py`): the robot's motion (rear-wheel drive, sensors 20 cm
 in front), line sensors, start button, magnets in the pads, boxes in rack
-slots (front distance sensor) and the IR traffic light. Needs `numpy` and
+slots (rear distance sensor), the box ahead of the grab sensor and the IR
+traffic light. Needs `numpy` and
 `matplotlib`.
 
 ```
@@ -194,18 +202,21 @@ data processing and a usage example.
   schematic. 39 = VSYS. 40 = VBUS, 5 V **only while USB is plugged in**. Do not
   connect anything to 37 (3V3_EN), 30 (RUN) or 35 (ADC_VREF).
 - Only GP26, GP27, GP28 (physical 31, 32, 34) can read analog voltages.
-- I2C: SDA and SCL must belong to the same bus. The schematic uses I2C0 on
-  GP16/GP17 and I2C1 on GP10/GP11 (one ToF sensor per bus).
+- I2C: for HARDWARE I2C, SDA and SCL must belong to the same bus (I2C0 or
+  I2C1). CHANGED (2026-10-27): after the team re-wired the SDA wires, the
+  ToF sensors use software I2C (SoftI2C, any two pins), one sensor per bus:
+  dist1 on GP2/GP17 (physical 4/22), dist2 on GP0/GP11 (physical 1/15). The
+  schematic still shows the old pins (GP16/GP17 and GP10/GP11).
 - **All GPIO pins are 3.3 V. Never put 5 V on a GPIO pin.**
 
-### Header map (final schematic)
+### Header map (final schematic, distance sensors re-wired 2026-10-27)
 
 ```
  phys GP    use (left side)                             phys GP    use (right side)
-    1 GP0   motor driver 1 #1 DIR (not in schematic)      21 GP16  Distance Sensor 1  D (SDA)  I2C0
-    2 GP1   motor driver 1 #1 PWM (not in schematic)      22 GP17  Distance Sensor 1  C (SCL)  I2C0
+    1 GP0   Distance Sensor 2  D (SDA)  SoftI2C *         21 GP16  free (was Distance Sensor 1 SDA)
+    2 GP1   motor driver 1 #1 PWM (not in schematic)      22 GP17  Distance Sensor 1  C (SCL)  SoftI2C
     3 GND                                                 23 GND   optocoupler ground
-    4 GP2   motor driver 1 #2 (assumed)                   24 GP18  Line Sensor Edge Right    OUT
+    4 GP2   Distance Sensor 1  D (SDA)  SoftI2C *         24 GP18  Line Sensor Edge Right    OUT
     5 GP3   motor driver 1 #2 (assumed)                   25 GP19  Line Sensor Centre Right  OUT
     6 GP4   DIR1   motor 1 direction                      26 GP20  Line Sensor Edge Left     OUT
     7 GP5   PWM1   motor 1 speed                          27 GP21  Line Sensor Centre Left   OUT
@@ -215,9 +226,9 @@ data processing and a usage example.
    11 GP8   Crash Sensor R  DIG/S                         31 GP26  Magnetometer OUT (ADC0)
    12 GP9   Crash Sensor L  DIG/S                         32 GP27  Red LED (via optocoupler)
    13 GND                                                 33 AGND
-   14 GP10  Distance Sensor 2  D (SDA)  I2C1              34 GP28  Green LED (via optocoupler)
-   15 GP11  Distance Sensor 2  C (SCL)  I2C1              35 VREF  ADC_VREF, do not use
-   16 GP12  free (dept. example: start button)            36 3V3   3V3_OUT: power for ALL sensors
+   14 GP10  free (was Distance Sensor 2 SDA)              34 GP28  Green LED (via optocoupler)
+   15 GP11  Distance Sensor 2  C (SCL)  SoftI2C           35 VREF  ADC_VREF, do not use
+   16 GP12  Push button DIG/S (optional start button)     36 3V3   3V3_OUT: power for ALL sensors
    17 GP13  ServoPin2  servo 2 signal                     37 3V3EN 3V3_EN, do not use
    18 GND                                                 38 GND   ground for ALL sensors
    19 GP14  IR Sensor OUT                                 39 VSYS
@@ -228,8 +239,10 @@ data processing and a usage example.
   PWM2 / ServoPin1 / ServoPin2 (the same pins as the department examples).
 - The three indicator LEDs are switched through a 4-channel optocoupler:
   GPIO HIGH -> LED on (`config.LED_PINS`).
-- Only GP12 (physical 16) is still free, plus GP0-GP3 if motor driver 1 is
-  not used.
+- \* GP0 / GP2 may also be routed to motor driver 1 on the department board:
+  nothing may be plugged into motor driver 1 (`config.BOARD_CHECKS`).
+- Free pins (CHANGED 2026-10-27): GP10 and GP16 (physical 14 and 21), plus
+  GP1 / GP3 if motor driver 1 is not used.
 
 ---
 

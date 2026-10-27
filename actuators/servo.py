@@ -25,7 +25,7 @@ Usage
     from actuators.servo import Servo
     import config
     gripper = Servo(config.SERVO_PINS["servo2"])   # safe range / reset path from config.py
-    gripper.reset()             # REQUIRED first move after power-up (to the middle, 150)
+    gripper.reset()             # REQUIRED first move after power-up (to the middle, 150; waits 600 ms)
     gripper.set_angle(160)      # always kept inside the safe range (130 - 171)
 """
 
@@ -50,8 +50,18 @@ class Servo:
         # When they are not given, they are looked up in config.py by the pin
         # number, so even code that only writes Servo(15) is protected.
         name = self._config_name(pin_number)
+        # FIX (2026-10-27): a gripper servo (its pin is in config.SERVO_PINS)
+        # whose safe range is missing or None in config.SERVO_SAFE_RANGE is
+        # now BLOCKED: _drive() never sends it a pulse. Before, it silently got
+        # the whole 0 - 270 range, so reset() sent it to 135 and the carry pose
+        # to 270 - straight into the gripper's end stops (stall, Pico brown-out).
+        # config.py says None means "not measured yet: do not move it".
+        self.blocked = False
         if safe_range is None:
-            safe_range = self._from_config("SERVO_SAFE_RANGE", name, (0, self.MAX_ANGLE))
+            safe_range = self._from_config("SERVO_SAFE_RANGE", name, None)
+            if safe_range is None:
+                self.blocked = name is not None     # only servos that config.py knows
+                safe_range = (0, self.MAX_ANGLE)
         if reset_path is None:
             reset_path = self._from_config("SERVO_RESET", name, None)
         self.low, self.high = safe_range
@@ -79,18 +89,34 @@ class Servo:
             value = None
         return default if value is None else value
 
-    def reset(self, settle_ms=600, step_ms=20):
+    def reset(self, settle_ms=600, step_ms=20, target=None):
         """ADDED (2026-10-23): bring the servo to its start position the safe way.
 
         With a reset_path (start, end): go to `start`, wait settle_ms so the
         servo has really arrived there, then turn slowly to `end`, one degree
         every step_ms. So the servo always finishes by moving from start to
-        end (servo2: 220 -> 250, the only direction that is safe for the
-        gripper). Without a reset_path: straight to the middle of the safe
-        range. Every angle sent is inside the safe range. This WAITS until
-        the servo is there (about 1.6 s for servo2). Returns the final angle."""
+        end (for a gripper where only one direction is safe; CHANGED
+        2026-10-27: config.SERVO_RESET is empty for the new gripper, the old
+        servo2 path 220 -> 250 is gone). Without a reset_path: straight to
+        the middle of the safe range, then wait settle_ms. Every angle sent
+        is inside the safe range. This WAITS until the servo is there
+        (settle_ms, plus the slow turn if there is a path). Returns the
+        final angle.
+
+        target: ADDED (2026-10-27) without a reset_path, go straight to this
+        angle instead of the middle (still clamped into the safe range).
+        gripper_start() passes the carry pose, so the gripper makes ONE move
+        at start-up instead of middle-then-carry (the arm used to dip down to
+        the middle and then lift again)."""
         if self.reset_path is None:
-            self._drive((self.low + self.high) // 2)
+            if target is None:
+                target = (self.low + self.high) // 2
+            self._drive(target)                 # _drive clamps into the safe range
+            # FIX (2026-10-27): wait here too. Before, reset() returned at
+            # once after the jump, and gripper_start() (actuators/gripper.py)
+            # waited only GRIPPER_PAUSE_MS (300 ms) before the next move, so
+            # the servo could still be on its way to the middle.
+            sleep_ms(settle_ms)
             return self._angle
         start, end = self.reset_path
         self._drive(start)
@@ -115,25 +141,32 @@ class Servo:
         self._drive(angle)
         return True
 
-    def move_slowly(self, angle, step_ms=10):
+    def move_slowly(self, angle, step_ms=10, low=None):
         """ADDED (2026-10-26): turn to `angle` one degree at a time, waiting
         step_ms after each degree, so the gripper moves gently instead of
         jumping. The target is clamped into the safe range first, and every
         step lies between the present angle and the target, so the servo
         only moves inside its safe range and only in one direction.
         Like set_angle(), it does nothing on a servo with no pulses (call
-        reset() first). WAITS until the end. Returns True if it moved."""
+        reset() first). WAITS until the end. Returns True if it moved.
+
+        low: ADDED (2026-10-27) a different lowest angle for THIS move only,
+        instead of the safe range's low end. Used for ONE thing: closing the
+        gripper further than its normal range to push a box into its slot
+        (config.SERVO_PUSH_ANGLE, the user's decision), and opening it again
+        from there. Every other move keeps the normal safe range."""
         if self._angle is None:
             print("servo (safe range %d-%d) has no pulses yet: move_slowly(%s) ignored, call reset() first"
                   % (self.low, self.high, angle))
             return False
-        target = max(self.low, min(self.high, int(round(angle))))
+        floor = self.low if low is None else max(0, low)
+        target = max(floor, min(self.high, int(round(angle))))
         current = int(round(self._angle))
         direction = 1 if target >= current else -1
         for step in range(current + direction, target + direction, direction):
-            self._drive(step)
+            self._drive(step, floor)
             sleep_ms(step_ms)
-        self._drive(target)
+        self._drive(target, floor)
         return True
 
     def start_at(self, angle):
@@ -145,11 +178,17 @@ class Servo:
         self._drive(angle)
         return self._angle
 
-    def _drive(self, angle):
+    def _drive(self, angle, low=None):
         """ADDED (2026-10-23): send the pulse for `angle`, clamped into the safe
-        range (the old set_angle body; it clamped to 0 .. 270)."""
-        if angle < self.low:
-            angle = self.low
+        range (the old set_angle body; it clamped to 0 .. 270).
+        low: CHANGED (2026-10-27) only move_slowly(..., low=...) passes it
+        (the push at the drop-off); otherwise the safe range's low end."""
+        if self.blocked:                  # FIX (2026-10-27): no safe range known -> never move
+            print("servo on a pin without a safe range in config.SERVO_SAFE_RANGE: not moved")
+            return
+        floor = self.low if low is None else low
+        if angle < floor:
+            angle = floor
         if angle > self.high:
             angle = self.high
         if angle > self.ANGLE_LIMIT:      # ADDED (2026-10-23): hard ceiling, whatever the range says

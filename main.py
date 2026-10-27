@@ -54,12 +54,11 @@ def main():
 
             if len(robot.queue)==0:
                 variables[16].box_count+=1
-                variables[16].queue=[
-                    "go_back",
-                    "deliver",
-                    "collect",
-                    "pick_up"
-                    ]
+                # CHANGED (2026-10-27): the extra "pick_up" at the end (= done
+                # FIRST, in the start box) was a test shortcut; the pick-up is
+                # now tested on its own with tests/test_pickup.py, starting
+                # right after the turn into a box.
+                variables[16].queue=["go_back","deliver","collect"]
             
             variables, now = f.robot_mode_check(variables, now)
             # Action

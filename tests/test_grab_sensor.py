@@ -10,7 +10,7 @@ would make of it:
     IN REACH      config.GRAB_REACH_MM or closer (close enough to grab)
 Hold a box in front of the sensor and move it closer / further, then put the
 values you want into config.py. Also check which sensor reacts: if it is the
-wrong one, swap FRONT_TOF and GRAB_TOF in config.py. Stop with Ctrl-C.
+wrong one, swap REAR_TOF and GRAB_TOF in config.py. Stop with Ctrl-C.
 """
 
 from utime import sleep_ms

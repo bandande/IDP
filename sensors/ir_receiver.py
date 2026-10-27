@@ -278,9 +278,19 @@ class IRReceiver:
         return None
 
     def clear(self):
-        """Drop queued frames and any frame in progress."""
+        """Drop queued frames and any frame in progress.
+
+        FIX (2026-10-27): also forget the "IR seen recently" flag. ticks_us()
+        wraps after about 17.9 minutes, so an edge more than ~8.9 minutes old
+        looks like it is in the FUTURE (negative ticks_diff); process() then
+        never cleared _recent and signal_present() said True. If the robot
+        stood switched on for 9+ minutes after the last stray IR pulse, the
+        traffic light (light_reset() calls clear()) could turn "green"
+        without any beacon. A real beacon sets the flag again with its next
+        burst (a few ms)."""
         self._frames = []
         self._frame = None
+        self._recent = False
 
     def deinit(self):
         """Disable the IRQ."""

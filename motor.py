@@ -15,10 +15,16 @@ class Motor:
         self.pwm.duty_u16(0)
         
     def Forward(self, speed=100):
+        speed = max(0, min(100, speed))        # FIX (2026-10-27): keep the duty inside 0 - 65535
         self.mDir.value(0)                     # forward = 0 reverse = 1 motor
         self.pwm.duty_u16(int(65535 * speed / 100))  # speed range 0-100 motor
 
     def Reverse(self, speed=100):
+        # FIX (2026-10-27): clamp to 0 - 100 %. A negative speed (e.g. a
+        # steering correction larger than the base speed) gave a negative
+        # duty_u16, and more than 100 % a duty above 65535: neither is a valid
+        # PWM value, so the wheel speed was undefined.
+        speed = max(0, min(100, speed))
         self.mDir.value(1)
         self.pwm.duty_u16(int(65535 * speed / 100))
         
@@ -59,20 +65,25 @@ def test_motors():
     # #             sleep(1)
     # # finally:
     
-    print("Forward")
-    robot.forward(motor3, motor4)
-    sleep(1)
-    print("Right")
-    robot.right(motor3, motor4)
-    sleep(1)
-    print("Left")
-    robot.left(motor3, motor4)
+    # FIX (2026-10-27): try / finally, so Ctrl-C (or an error) during one of
+    # the sleep(1) calls still switches both motors off. Before, the wheels
+    # kept turning after Ctrl-C until the Pico was reset.
+    try:
+        print("Forward")
+        robot.forward(motor3, motor4)
+        sleep(1)
+        print("Right")
+        robot.right(motor3, motor4)
+        sleep(1)
+        print("Left")
+        robot.left(motor3, motor4)
 
-    sleep(1)
-    print("Reverse")
-    robot.forward(motor3, motor4, reverse=True)
-    sleep(1)
-    robot.stop(motor3, motor4)
+        sleep(1)
+        print("Reverse")
+        robot.forward(motor3, motor4, reverse=True)
+        sleep(1)
+    finally:
+        robot.stop(motor3, motor4)
     
     # count=0
     # while count<1:
