@@ -31,9 +31,11 @@ from sensors.tof import tof_from_config
 
 def test_tof(seconds=None):
     tofs = tof_from_config()
-    for name, s in tofs.items():
-        print("%s: address 0x%02X available %s %s" % (
-            name, s.address, s.available, "" if s.available else s.last_error))
+    while True:
+        for name, s in tofs.items():
+            # print("%s: address 0x%02X available %s %s" % (
+            #     name, s.address, s.available, "" if s.available else s.last_error))
+            print(s.processor.value)
     start = ticks_ms()
     last_print = start
     while seconds is None or ticks_diff(ticks_ms(), start) < seconds * 1000:

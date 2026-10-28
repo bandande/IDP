@@ -120,7 +120,7 @@ class Robot:
         self.motor_left=False
         self.motor_right=False
         
-        self.drop_off_info=[0,0,0]
+        self.drop_off_info=[1,1,0]
         
         self.start=0
     
@@ -747,7 +747,8 @@ def robot_mode_check(variables, now):
         
         if ((robot.left_sensor == 1 and robot.left_sensor_previous == 0)
             or (robot.right_sensor == 1 and robot.right_sensor_previous == 0)) \
-                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until:
+                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until \
+                and robot.queue[-1]=="straight":
             # A junction has been detected
                     
             print("JUNCTION DETECTED")
@@ -858,7 +859,7 @@ def robot_mode_check(variables, now):
                     time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
                     robot.about(motor3,motor4, c.TURN_SPEED)
-                    time_count=now+turn_min*1.9
+                    time_count=now+turn_min*2.3
                 at_start=False
     
     

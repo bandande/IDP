@@ -47,12 +47,12 @@ def main():
     # variables[16].position = "JUNCTION_LEFT_BOTTOM"
     # variables[16].objective = "FUNCTION_GREEN_1"
     # variables[16].direction = "north"
-    variables[16].position = "JUNCTION_GREEN_2"
-    variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
-    variables[16].direction = "north"
-    # variables[16].position = "START"
-    # variables[16].objective = "START"
+    # variables[16].position = "JUNCTION_GREEN_2"
+    # variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
     # variables[16].direction = "north"
+    variables[16].position = "START"
+    variables[16].objective = "START"
+    variables[16].direction = "north"
     
     
     #start running
