@@ -248,7 +248,7 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # gripper. Angles above 270 need pulses longer than the servo's maximum of
 # 2.5 ms (at 300 a servo ran away), so 270 is also a hard limit in
 # actuators/servo.py, whatever is written here.
-SERVO_SAFE_RANGE = {"servo1": (155, 173), "servo2": (130, 171)}
+SERVO_SAFE_RANGE = {"servo1": (155, 173), "servo2": (132, 170)}
 # ADDED (2026-10-23): the angle at which the gripper holds a box (measured
 # with the sensor viewer's Grab / Servo tab). servo2 never goes below it.
 # CHANGED (2026-10-26): emptied - the old grab angle (servo2 220) belonged to
@@ -286,12 +286,13 @@ GRAB_STOP_MM = 50              # stop in front of the box at this GRAB sensor di
 # for this long in a row (~3 cm of blind driving at GRAB_APPROACH_SPEED).
 # Must be longer than TOF_STALE_MS (validate() checks it), else one slow
 # reading would already end the pick-up.
-GRAB_NO_READING_MAX_MS = 500
+GRAB_NO_READING_MAX_MS = 1000
 # ADDED (2026-10-27): the lowest motor power (%) that really moves the robot.
 # On the robot 30 % did NOT move it (it stood on the cross line until the
 # time limit) while 40 % did; validate() refuses lower speeds below.
 MIN_MOVING_SPEED = 40
 GRAB_APPROACH_SPEED = 50       # CHANGED (2026-10-27, was 30): motor power (%) while driving up to the box
+GRAB_REVERSE_SPEED = 70        # Reverse speed
 GRAB_STEER = 15                # the wheel on the line's side runs this much slower (%) to steer along it
 GRAB_APPROACH_MAX_MS = 4000    # never drive towards the box longer than this
 GRIPPER_STEP_MS = 10           # servos turn 1 degree every this many ms (gentle, no jumps)

@@ -879,10 +879,14 @@ def robot_mode_check(variables, now):
             robot.previous_position=robot.position
             robot.position=robot.objective          # in the box (e.g. GREEN_1)
             # the U-turn spins away from the neighbouring box (config)
+            print("now")
+            gripper_carry(variables[19], variables[20])
+            utime.sleep_ms(1000)
             robot.pickup = PickUp(robot, motor3, motor4, servo1, servo2, tasks,
                                   config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left"))
+            
+            
             robot.pickup.start(now)
-            gripper_carry(variables[19], variables[20])
         elif robot.pickup.update(now):
             picking_up=False
             if robot.pickup.ok:

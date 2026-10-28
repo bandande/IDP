@@ -200,7 +200,6 @@ class PickUp:
             # moves towards the box at all.
             self._update_to_box(now_ms)
             return
-
         if self._time_is_up(now_ms, config.PICKUP_TO_CROSS_MAX_MS):
             self._fail(now_ms, "no cross line within %d ms" % config.PICKUP_TO_CROSS_MAX_MS)
             return
@@ -226,12 +225,17 @@ class PickUp:
         # config.GRAB_TOF) - the only sensor used at the pick-up
         distance = self.tasks.box_distance_now()   # non-blocking, mm or None
         self.last_distance_mm = distance
+        
+        print("DEBUG: grab distance =", distance)
+        print("DEBUG: grab_tof =", self.tasks.grab_tof)
 
         if distance is not None and distance <= config.GRAB_STOP_MM:
             # Stop at once, the box is right in front of the gripper.
             self.robot.stop(self.motor3, self.motor4)
             self._change_phase("grab", now_ms, "box %d mm ahead" % distance)
             return
+        else:
+            print("DISTANCE IS NONE")
 
         # ADDED (2026-10-27): None = no distance this time (the sensor did
         # not answer, its reading is too old, or nothing is in range). A few
@@ -343,7 +347,7 @@ class PickUp:
             return
 
         # self._follow_line()
-        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        speed = _speed_at_least_1(config.GRAB_REVERSE_SPEED)
         self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
     # -----------------------------------------------------------------

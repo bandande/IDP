@@ -203,9 +203,13 @@ class TaskSensors:
         every loop while the robot moves (the sensor gives ~10 new values / s,
         one every config.TOF_PERIOD_MS - CHANGED 2026-10-27, was ~30 / s)."""
         if self.grab_tof is None:
+            print("DEBUG: grab_tof is None")
             return None
-        self.grab_tof.poll()
-        return self.grab_tof.get_distance()
+
+        result = self.grab_tof.poll()
+        distance = self.grab_tof.get_distance()
+        print("DEBUG:", result, distance)
+        return distance
 
     def rear_distance_now(self):
 
