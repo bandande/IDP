@@ -961,7 +961,6 @@ def robot_mode_check(variables, now):
                             
             time_count=now+drop_off_distance
         elif robot.mode_extra_specific=="move_straight_and_detect":
-            print("now: "+ str(now) + "     timecount: "+ str(time_count))
             if now>=time_count:
                 print("now its finally stopped")
                 robot.stop(motor3,motor4)
@@ -986,9 +985,16 @@ def robot_mode_check(variables, now):
                             readings.append(d)
                         else:
                             print("d is none")
+                    else:
+                        print("poll not polling")
                 readings.sort()
                 print(readings)
                 mean_scan=readings[int(len(readings)/2)]
+                
+                # ==========================
+                robot.stop(motor3, motor4)
+                is_started=False
+                return
                 
                 print("DISTANCE MEASURED:"+str(mean_scan))
                 if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:

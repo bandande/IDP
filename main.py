@@ -59,14 +59,15 @@ def main():
                 # FIRST, in the start box) was a test shortcut; the pick-up is
                 # now tested on its own with tests/test_pickup.py, starting
                 # right after the turn into a box.
-                variables[16].queue=["go_back","deliver"
-                                     ,"collect"
+                variables[16].queue=["go_back","deliver",
+                                     "collect",
+                                     "deliver"
                                      ]
                 # variables[16].position = "JUNCTION_LEFT_BOTTOM_DROP_1"
                 # variables[16].objective = "LEFT_BOTTOM_DROP_1"
                 # variables[16].direction = "east"
-                variables[16].position = "JUNCTION_LEFT_BOTTOM"
-                variables[16].objective = "JUNCTION_GREEN_1"
+                variables[16].position = "JUNCTION_GREEN_2"
+                variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
                 variables[16].direction = "north"
             variables, now = f.robot_mode_check(variables, now)
             # Action
