@@ -36,6 +36,7 @@ def main():
     # ADDED (2026-10-26, test build): after the start press (nothing moves
     # before it) reset the gripper the safe way and set its carry pose.
     f.gripper_start(variables[19], variables[20])
+    f.grab_box(variables[19], variables[20])
     #start running
 
 
@@ -50,16 +51,20 @@ def main():
         if is_started:
             
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
-            variables = f.update_sensors(variables)
+            if variables[2]%2==0:
+                variables = f.update_sensors(variables)
 
             if len(robot.queue)==0:
-                variables[16].box_count+=1
                 # CHANGED (2026-10-27): the extra "pick_up" at the end (= done
                 # FIRST, in the start box) was a test shortcut; the pick-up is
                 # now tested on its own with tests/test_pickup.py, starting
                 # right after the turn into a box.
-                variables[16].queue=["go_back","deliver","collect"]
-            
+                variables[16].queue=["go_back","deliver"
+                                    #  ,"collect"
+                                     ]
+                variables[16].position = "JUNCTION_LEFT_BOTTOM_DROP_1"
+                variables[16].objective = "LEFT_BOTTOM_DROP_1"
+                variables[16].direction = "east"
             variables, now = f.robot_mode_check(variables, now)
             # Action
             

@@ -390,6 +390,7 @@ def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
             time_count=time_count-now
             #Then turn left
+    return time_count
         
 def update_sensors(variables):
 
@@ -743,7 +744,7 @@ def robot_mode_check(variables, now):
             robot.forward(motor3,motor4, reverse=reversing)
             print("motor not forward")
         if not reversing:
-            corrections(robot,motor3,motor4, reverse=reversing)
+            time_count = corrections(robot,motor3,motor4, reverse=reversing)
                 
                     
                 
@@ -839,7 +840,7 @@ def robot_mode_check(variables, now):
                     time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
                     robot.about(motor3,motor4)
-                    time_count=now+turn_min*2
+                    time_count=now+turn_min*2.5
                 at_start=False
     
     
@@ -881,6 +882,7 @@ def robot_mode_check(variables, now):
             robot.pickup = PickUp(robot, motor3, motor4, servo1, servo2, tasks,
                                   config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left"))
             robot.pickup.start(now)
+            gripper_carry(variables[19], variables[20])
         elif robot.pickup.update(now):
             picking_up=False
             if robot.pickup.ok:
@@ -898,7 +900,6 @@ def robot_mode_check(variables, now):
                 robot.has_box=True
                 robot.previous_position=robot.position
                 robot.position="JUNCTION_" + robot.final_objective
-                robot.direction=turn_to_direction(robot.direction, "about")
                 robot.mode=""
                 # ADDED (2026-10-27): for now the robot only REPORTS the pole
                 # and stops on the main line after the U-turn (it does not
@@ -918,113 +919,119 @@ def robot_mode_check(variables, now):
                 robot.mode=""
     elif robot.mode == "drop_off":
                     #Do some actual dropping off stuff etc
-        utime.sleep(2)
-        print("DROPPING STUFF")
-                    # This should have the dropping off and so on code
-        # =======================
-        robot.previous_position=robot.position
-        robot.position=robot.objective
-        map[robot.final_objective]["type"]="FILLED"
+        # utime.sleep(2)
+        # print("DROPPING STUFF")
+        #             # This should have the dropping off and so on code
+        # # =======================
+        # robot.previous_position=robot.position
+        # robot.position=robot.objective
+        # map[robot.final_objective]["type"]="FILLED"
                                     
-        robot.mode=""
-        # ADDED (2026-10-26, test build): open servo2 a little to let go of
-        # the box, then stop (config.STOP_AFTER_DROP; a press goes on).
-        # CHANGED (2026-10-27): after letting go, back off, close the gripper
-        # to config.SERVO_PUSH_ANGLE, push the box in, back out and open the
-        # gripper again (control/dropoff.py release_and_push).
-        # CHANGED (2026-10-27): the drop-off now starts right after the turn
-        # into the drop branch (see "Prevent driving on into the drop branch"
-        # above): arm to config.DROP_SERVO1_ANGLE, follow the branch's line
-        # for config.DROP_DRIVE_MS, then let go and push
-        # (control/dropoff.py drive_in_and_drop; values from the calibration).
-        robot.stop(motor3, motor4)
-        drive_in_and_drop(robot, motor3, motor4, servo1, servo2, line=sensors)   # follows the branch's line
-        if config.STOP_AFTER_DROP:
-            is_started=False
-            print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")
+        # robot.mode=""
         
-        # if not dropping_off:
-        #                 #Do some actual grabbing stuff etc
-        #     robot.previous_position=robot.position
-        #     robot.position=robot.objective
-        #     print(robot.position)
-        #     utime.sleep(1)
-        #     print("DROPPING STUFF")
-        #                 # Turning hasn't started, do the turns
-        #     dropping_off=True
-        #     robot.mode_extra_specific="move_straight_and_detect"
+        
+        # robot.stop(motor3, motor4)
+        # drive_in_and_drop(robot, motor3, motor4, servo1, servo2, line=sensors)   # follows the branch's line
+        # if config.STOP_AFTER_DROP:
+        #     is_started=False
+        #     print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")
+        
+        
+        if not dropping_off:
+                        #Do some actual grabbing stuff etc
+            robot.previous_position=robot.position
+            robot.position=robot.objective
+            print(robot.position)
+            utime.sleep(1)
+            print("DROPPING STUFF")
+                        # Turning hasn't started, do the turns
+            dropping_off=True
+            robot.mode_extra_specific="move_straight_and_detect"
                         
-        #     robot.forward(motor3,motor4)
-        #                 # If at top, then move very slightly less
-        #     if robot.drop_off_info[1]==0:
-        #         drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN
-        #     else:
-        #         drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-200
+            robot.forward(motor3,motor4)
+                        # If at top, then move very slightly less
+            if robot.drop_off_info[1]==0:
+                drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN
+            else:
+                drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_FOR_TOP_DROP_OFF
                             
-        #     time_count=now+drop_off_distance
-        # elif robot.mode_extra_specific=="move_straight_and_detect":
-        #     if now>=time_count:
-        #         robot.stop(motor3,motor4)
-        #         robot.mode_extra_specific="move_turning"
-        #         drop_off_turn_count=0
-                        
-        #     corrections(robot, motor3, motor4, time_count=time_count)
-        # elif robot.mode_extra_specific=="move_turning":
-        #                 # If this is coming from drop_off point
-        #     if drop_off_turn_count==0:
-        #         skip_forward=True
-        #         robot.queue+=["drop_off", ["turning", "about", 90]]
-        #         robot.mode=""
-        #     elif drop_off_turn_count==1:
-        #         for i in range(10):
-        #             if tasks.grab_tof.poll():
-        #                 d = tasks.grab_tof.get_distance()
-        #                 if d is not None:
-        #                     readings.append(d)
-        #         read=readings[-10:]
-        #         read.sort()
-        #         mean_scan=read[5]
-        #         print("DISTANCE MEASURED:"+str(mean_scan))
-        #         if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
-        #             # Use sensor to detect if box is there or not
-        #             print("NO BOX SEEN")
-        #             skip_forward=True
-        #             robot.queue+=["drop_off", ["turning", "about", 90]]
-        #             robot.mode=""
-        #         else:
-        #             print("BOX THERE ALREADY")
-        #             # If there already is a box
-        #             map[robot.final_objective]["type"]="FILLED"
-        #             robot.queue+=["deliver"]
-        #             robot.mode=""
-        #             dropping_off=False
-        #     elif drop_off_turn_count==2:
-        #         robot.mode_extra_specific="move_and_drop_off"
-        #         robot.forward(motor3,motor4)
-        #         time_count=now+c.DISTANCE_TO_DROP_POINT
-        # elif robot.mode_extra_specific=="move_and_drop_off":
-        #     if now>=time_count:
-        #         robot.stop(motor3, motor4)
-        #         # Do the servo motions and moving, using sleep as well for moving forwards as 
-        #                     # this needs to be hugely precise
-        #                     # Drop off
-        #         robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
-        #         utime.sleep_ms(20)
-        #         servo1.set_angle(0)
-        #         robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
+            time_count=now+drop_off_distance
+        elif robot.mode_extra_specific=="move_straight_and_detect":
+            print("now: "+ str(now) + "     timecount: "+ str(time_count))
+            if now>=time_count:
+                print("now its finally stopped")
+                robot.stop(motor3,motor4)
+                robot.mode_extra_specific="move_turning"
+                drop_off_turn_count=0
+            
+            if motor3.return_state() == 0 or motor4.return_state()==0:
+                robot.forward(motor3,motor4, reverse=reversing)
+            time_count = corrections(robot, motor3, motor4, time_count=time_count)
+            
+        elif robot.mode_extra_specific=="move_turning":
+                        # If this is coming from drop_off point
+            if drop_off_turn_count==0:
+                skip_forward=True
+                robot.queue+=["drop_off", ["turning", "about", 90]]
+                robot.mode=""
+            elif drop_off_turn_count==1:
+                for i in range(10):
+                    if tasks.rear_tof.poll():
+                        d = tasks.rear_distance_now()
+                        if d is not None:
+                            readings.append(d)
+                        else:
+                            print("d is none")
+                readings.sort()
+                print(readings)
+                mean_scan=readings[int(len(readings)/2)]
                 
-        #         servo1.set_angle(0)
-        #         servo2.set_angle(0)
+                print("DISTANCE MEASURED:"+str(mean_scan))
+                if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
+                    # Use sensor to detect if box is there or not
+                    print("NO BOX SEEN")
+                    utime.sleep_ms(1000)
+                    skip_forward=True
+                    robot.queue+=["drop_off", ["turning", "about", 90]]
+                    robot.mode=""
+                else:
+                    print("BOX THERE ALREADY")
+                    # If there already is a box
+                    map[robot.final_objective]["type"]="FILLED"
+                    robot.queue+=["deliver"]
+                    robot.mode=""
+                    dropping_off=False
+            elif drop_off_turn_count==2:
+                robot.mode_extra_specific="move_and_drop_off"
+                robot.forward(motor3,motor4)
+                time_count=now+c.DISTANCE_TO_DROP_POINT
+        elif robot.mode_extra_specific=="move_and_drop_off":
+            if now>=time_count:
+                robot.stop(motor3, motor4)
+                # Do the servo motions and moving, using sleep as well for moving forwards as 
+                            # this needs to be hugely precise
+                            # Drop off
+                robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
+                utime.sleep_ms(100)
+                release_box(servo2)
+                robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
+                
+                servo1.move_slowly(gripper_end(servo1, config.GRIPPER_CARRY.get("servo1", "low")),
+                                       config.GRIPPER_STEP_MS)
+                servo2.move_slowly(gripper_end(servo2, config.GRIPPER_CARRY.get("servo2", "low")),
+                                       config.GRIPPER_STEP_MS)
                 
                 
-        #         print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
-        #         robot.box_count+=1
-        #         robot.has_box=False
+                print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
+                robot.box_count+=1
+                robot.has_box=False
                             
-        #         map[robot.final_objective]["type"]="FILLED"
+                map[robot.final_objective]["type"]="FILLED"
                             
-        #         robot.mode=""
-        #     corrections(robot, motor3, motor4, time_count=time_count)
+                robot.mode=""
+                print("I AM AT: " +str(robot.position))
+            
+            
     
                     
     elif robot.mode == "wait_light":
