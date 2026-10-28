@@ -61,10 +61,10 @@ class Servo:
             safe_range = self._from_config("SERVO_SAFE_RANGE", name, None)
             if safe_range is None:
                 self.blocked = name is not None     # only servos that config.py knows
-                safe_range = (0, self.MAX_ANGLE)
+                safe_range = (0, int(self.MAX_ANGLE/2),  self.MAX_ANGLE)
         if reset_path is None:
             reset_path = self._from_config("SERVO_RESET", name, None)
-        self.low, self.high = safe_range
+        self.low, self.medium, self.high = safe_range
         self.reset_path = reset_path
 
     @staticmethod

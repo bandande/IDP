@@ -59,6 +59,7 @@ ticks_diff needed).
 """
 
 import config
+import constants
 from actuators.gripper import grab_box
 
 # CHANGED (2026-10-27): the "no distance reading" limit of "to_box" is now
@@ -164,8 +165,7 @@ class PickUp:
             self._update_to_box(now_ms)
         elif self.phase == "grab":
             self._update_grab(now_ms)
-        elif self.phase == "reverse":
-            print("now its reverse")
+        elif self.phase == "reverse":            
             self._update_reverse(now_ms)
         elif self.phase == "back_to_main":
             self._update_back_to_main(now_ms)
@@ -226,10 +226,10 @@ class PickUp:
         distance = self.tasks.box_distance_now()   # non-blocking, mm or None
         self.last_distance_mm = distance
         
-        print("DEBUG: grab distance =", distance)
-        print("DEBUG: grab_tof =", self.tasks.grab_tof)
 
-        if distance is not None and distance <= config.GRAB_STOP_MM:
+
+        if distance is not None and distance <= constants.DISTANCE_TO_PICK_UP:
+            print(distance)
             # Stop at once, the box is right in front of the gripper.
             self.robot.stop(self.motor3, self.motor4)
             self._change_phase("grab", now_ms, "box %d mm ahead" % distance)
@@ -289,7 +289,7 @@ class PickUp:
         print("reverse")
         self._change_phase("reverse", now_ms, "box held")
         self._left_line = False
-        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        speed = _speed_at_least_1(config.GRAB_REVERSE_SPEED)
         self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
     def _update_reverse(self, now_ms):
@@ -305,7 +305,6 @@ class PickUp:
 
 
 
-        print((now_ms - self._phase_start_ms))
         long_enough = (now_ms - self._phase_start_ms) >= config.PICKUP_REVERSE_MIN_MS   # condition (a)
 
         if long_enough and (r.left_sensor == 1 or r.right_sensor == 1):
@@ -321,7 +320,7 @@ class PickUp:
             return
 
         # Keep spinning (sent again every call, like the other phases).
-        speed = _speed_at_least_1(config.GRAB_APPROACH_SPEED)
+        speed = _speed_at_least_1(config.GRAB_REVERSE_SPEED)
         self.robot.forward(self.motor3, self.motor4, speed, speed, reverse=True)
 
     def _update_back_to_main(self, now_ms):

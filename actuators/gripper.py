@@ -32,14 +32,27 @@ import config
 # its safe reset (straight to the middle of its range).
 def gripper_end(servo, end):
     """The angle of the "low" or "high" end of a servo's safe range."""
-    return servo.low if end == "low" else servo.high
+    if end == "low":
+        return servo.low
+    elif end == "medium":
+        return servo.medium
+    else:
+        return servo.high
+
+
+def gripper_lift(servo1, servo2):
+    """Gripper to its lift pose (config.GRIPPER_CARRY: servo1 up, servo2
+    open), servo1 first so the arm is up before the gripper opens."""
+    for name, servo in (("servo1", servo1), ("servo2", servo2)):
+        servo.move_slowly(gripper_end(servo, config.GRIPPER_LIFT.get(name, "high")), config.GRIPPER_STEP_MS)
 
 
 def gripper_carry(servo1, servo2):
     """Gripper to its carry pose (config.GRIPPER_CARRY: servo1 up, servo2
     open), servo1 first so the arm is up before the gripper opens."""
     for name, servo in (("servo1", servo1), ("servo2", servo2)):
-        servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "high")), config.GRIPPER_STEP_MS)
+        servo.move_slowly(gripper_end(servo, config.GRIPPER_CARRY.get(name, "medium")), config.GRIPPER_STEP_MS)
+    print(servo1.angle)
 
 def gripper_safe(servo1, servo2):
     """Gripper to its carry pose (config.GRIPPER_CARRY: servo1 up, servo2
@@ -68,7 +81,7 @@ def grab_box(servo1, servo2):
     """Pick the box up, standing in front of it: servo1 down to its low end,
     servo2 down to its low end (gripper closes), servo1 up to its high end."""
     for servo, end, what in ((servo1, "low", "arm down"), (servo2, "low", "gripper closed"),
-                             (servo1, "high", "arm up")):
+                             (servo1, "medium", "arm up")):
         servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
         print("gripper: %s (%s deg)" % (what, servo.angle()))
         utime.sleep_ms(config.GRIPPER_PAUSE_MS)

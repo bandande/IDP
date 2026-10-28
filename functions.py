@@ -17,7 +17,7 @@ from control.start_stop import StartStopButton
 from control.pickup import PickUp
 from control.dropoff import release_and_push     # ADDED (2026-10-27): let go + push the box in
 from control.dropoff import drive_in_and_drop    # ADDED (2026-10-27): drive into the branch, then the above
-from actuators.gripper import gripper_end, gripper_carry, gripper_start, grab_box, release_box
+from actuators.gripper import gripper_end, gripper_carry, gripper_start, grab_box, gripper_safe, release_box, gripper_lift
 
 
 def degrees_to_time(degrees):
@@ -169,7 +169,7 @@ class Robot:
                     motor4_speed=motor4.forward_speed
                 self.motor_left=False
                 self.motor_right=True
-                motor3.off()
+                motor3.Forward(motor3_speed)
                 motor4.Forward(motor4_speed)
                 
     def right(self, motor3, motor4, motor3_speed=None, motor4_speed=None, reverse=False):
@@ -192,7 +192,7 @@ class Robot:
                 self.motor_left=True
                 self.motor_right=False
                 motor3.Forward(motor3_speed)
-                motor4.off()
+                motor4.Forward(motor4_speed)
     def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
             """motor3 is left. motor4 is right
             """
@@ -353,43 +353,27 @@ class Robot:
         pass
     
 def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c.TURN_SPEED, reverse=None, time_count=0):
-    if reverse:
-        if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
-            # If left front sensor does not detect and right does
-            robot.queue.append(robot.mode)
-            
-            robot.mode="correction"
-            robot.right(motor3,motor4,motor_speed3, motor_speed4, reverse=reverse)
-            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
-            time_count=time_count-now
-            #Then turn right
-            
-        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
-            # If left front sensor does not detect and right does
-            robot.queue.append(robot.mode)
-            robot.mode="correction"
-            robot.left(motor3,motor4,motor_speed3, motor_speed4, reverse=reverse)
-            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
-            time_count=time_count-now
-            #Then turn left
-    else:
-        if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
-            # If left front sensor does not detect and right does
-            robot.queue.append(robot.mode)
-            robot.mode="correction"
-            robot.right(motor3,motor4,motor_speed3, motor_speed4)
-            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
-            time_count=time_count-now
-            #Then turn right
-            
-        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
-            # If left front sensor does not detect and right does
-            robot.queue.append(robot.mode)
-            robot.mode="correction"
-            robot.left(motor3,motor4,motor_speed3, motor_speed4)
-            now = utime.ticks_diff(utime.ticks_ms(), robot.start)
-            time_count=time_count-now
-            #Then turn left
+    correction_motor_speed3=motor_speed3
+    correction_motor_speed4=motor_speed4
+    if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
+        # If left front sensor does not detect and right does
+        robot.queue.append(robot.mode)
+        robot.mode="correction"
+        robot.right(motor3,motor4,correction_motor_speed3, correction_motor_speed4-30)
+        now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+        time_count=time_count-now
+        #Then turn right
+        
+    elif robot.front_left_sensor == 1 and robot.front_right_sensor == 0:
+        # If left front sensor does not detect and right does
+        robot.queue.append(robot.mode)
+        robot.mode="correction"
+        robot.left(motor3,motor4,correction_motor_speed3-30, correction_motor_speed4)
+        now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+        time_count=time_count-now
+
+        #Then turn left
+        
     return time_count
         
 def update_sensors(variables):
@@ -437,7 +421,7 @@ def wait_for_start(button):
 def button_check(variables):
     '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
     
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time , mean_scan= variables
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time , mean_scan, holdoff_until_reverse = variables
     #retrieve variables            
 
     
@@ -544,6 +528,7 @@ def button_check(variables):
                  turning,               #25
                  using_time,            #26
                  mean_scan,             #27
+                 holdoff_until_reverse, #28
                  )
     #condense and return new values of variables
 
@@ -553,7 +538,7 @@ def button_check(variables):
 def robot_mode_check(variables, now):
     '''checks the current robot mode and takes action accordingly, transferred over from main while loop'''
 
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time, mean_scan = variables
+    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time, mean_scan, holdoff_until_reverse = variables
     #retrieve variables            
 
     count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
@@ -598,12 +583,14 @@ def robot_mode_check(variables, now):
                 robot.queue = robot.queue[:-2]+[robot.queue[-1]]
                 print(robot.queue)
 
-            # Prevent moving forwards when picking up the box.
-            if (bool(re.match(r"^JUNCTION.*DROP",next_item))
-                and ("DROP" in robot.position and not robot.position.startswith("JUNCTION"))):
-                # Remove straight
-                robot.queue = robot.queue[:-2]+[robot.queue[-1]]
-                print(robot.queue)
+            # # Prevent moving forwards when picking up the box.
+            # if (bool(re.match(r"^JUNCTION.*DROP",next_item))
+            #     and ("DROP" in robot.position and not robot.position.startswith("JUNCTION"))):
+            #     # Remove straight
+            #     robot.queue = robot.queue[:-2]+[robot.queue[-1]]
+            #     robot.previous_position=robot.position
+            #     robot.position=robot.objective
+            #     print(robot.queue)
     
             # Stops errors with turning because line spacing is too small
             # If next is a junction and currently at a junction and came from a drop, then add a small reverse
@@ -657,7 +644,11 @@ def robot_mode_check(variables, now):
                     print(robot.find_route(robot.final_objective))
                     robot.queue+=robot.find_route(robot.final_objective)
                     robot.mode=""
-                                
+                
+            elif next_item == "drop_off":
+                print("STUFFF")
+                print("DROP_OFF="+ str(dropping_off))  
+                print("extra_mode="+robot.mode_extra_specific)          
             elif next_item == "deliver":
                             # Plan deliverance point
                             # Find deliverance point route and enter. include "drop_off"
@@ -704,8 +695,9 @@ def robot_mode_check(variables, now):
                 robot.forward(motor3,motor4)
             elif next_item == "reverse_straight":
                 print(robot.mode)
+                holdoff_until_reverse = now+500
                 reversing=True
-                robot.forward(motor3,motor4, reverse=reversing)
+                robot.forward(motor3,motor4, motor3.backward_speed-30, motor4.backward_speed-30, reverse=reversing)
                 robot.mode="straight"
             elif next_item == "wait_light":
                             # ADDED (2026-10-20): stop in front of the traffic light
@@ -723,7 +715,7 @@ def robot_mode_check(variables, now):
                     # JUNCTION_HOLDOFF_MS at the top; not set after a turn).
         if ((robot.left_sensor == 1 and robot.left_sensor_previous == 0)
             or (robot.right_sensor == 1 and robot.right_sensor_previous == 0)) \
-                and now >= holdoff_until:
+                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until:
             # A junction has been detected
                     
             print("JUNCTION DETECTED")
@@ -738,7 +730,8 @@ def robot_mode_check(variables, now):
                 utime.sleep_ms(100)
                 reversing=False
             robot.mode="" # Moves onto next instruction (which is turning)
-            holdoff_until = now + c.JUNCTION_HOLDOFF_MS   # ADDED (2026-10-20)
+            holdoff_until = now + c.JUNCTION_HOLDOFF_MS
+            holdoff_until_reverse = now
                     # If not moving straight
         elif motor3.return_state() == 0 or motor4.return_state()==0:
             robot.forward(motor3,motor4, reverse=reversing)
@@ -750,7 +743,32 @@ def robot_mode_check(variables, now):
                 
                 
     elif robot.mode == "correction":
-        if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
+        
+        
+        if ((robot.left_sensor == 1 and robot.left_sensor_previous == 0)
+            or (robot.right_sensor == 1 and robot.right_sensor_previous == 0)) \
+                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until:
+            # A junction has been detected
+                    
+            print("JUNCTION DETECTED")
+            robot.previous_position=robot.position
+            print(robot.position)
+    
+            robot.position=robot.objective
+                        # print("ROBOT_OBJECTIVE"+robot.objective)
+                        
+                        # In case it wants to reverse
+            if reversing:
+                utime.sleep_ms(100)
+                reversing=False 
+            if robot.queue[-1]=="straight":
+                robot.queue.pop()
+            robot.mode="" # Moves onto next instruction (which is turning)
+            holdoff_until = now + c.JUNCTION_HOLDOFF_MS
+            holdoff_until_reverse = now
+        
+        
+        elif robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
             robot.stop(motor3,motor4)
             robot.mode="" # Moves back to straight or turning
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
@@ -802,8 +820,8 @@ def robot_mode_check(variables, now):
                 robot.forward(motor3,motor4)
                 time_count=now+forward_ms
             elif robot.mode_specific[0]=="about":
-                robot.forward(motor3,motor4, reverse=True)
                 reversing=True
+                robot.forward(motor3,motor4, reverse=True)                
                 time_count=now+int(forward_ms/8)
                         
     
@@ -839,8 +857,8 @@ def robot_mode_check(variables, now):
                     robot.spin(motor3, motor4, "right", c.TURN_SPEED)
                     time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
-                    robot.about(motor3,motor4)
-                    time_count=now+turn_min*2.5
+                    robot.about(motor3,motor4, c.TURN_SPEED)
+                    time_count=now+turn_min*1.9
                 at_start=False
     
     
@@ -888,7 +906,7 @@ def robot_mode_check(variables, now):
             
             robot.pickup.start(now)
         elif robot.pickup.update(now):
-            picking_up=False
+            
             if robot.pickup.ok:
                 # Back on the main line, at the box's junction, facing the
                 # way it came in reversed (the U-turn). The next route
@@ -909,6 +927,7 @@ def robot_mode_check(variables, now):
                 # and stops on the main line after the U-turn (it does not
                 # yet turn left / right because of it). A press of the button
                 # goes on with the route.
+                picking_up=False
                 if config.STOP_AFTER_PICKUP:
                     robot.stop(motor3, motor4)
                     is_started=False
@@ -943,10 +962,12 @@ def robot_mode_check(variables, now):
         
         if not dropping_off:
                         #Do some actual grabbing stuff etc
+            
             robot.previous_position=robot.position
             robot.position=robot.objective
+            
             print(robot.position)
-            utime.sleep(1)
+            utime.sleep_ms(500)
             print("DROPPING STUFF")
                         # Turning hasn't started, do the turns
             dropping_off=True
@@ -961,15 +982,16 @@ def robot_mode_check(variables, now):
                             
             time_count=now+drop_off_distance
         elif robot.mode_extra_specific=="move_straight_and_detect":
+            
             if now>=time_count:
-                print("now its finally stopped")
                 robot.stop(motor3,motor4)
                 robot.mode_extra_specific="move_turning"
                 drop_off_turn_count=0
             
-            if motor3.return_state() == 0 or motor4.return_state()==0:
+            elif motor3.return_state() == 0 or motor4.return_state()==0:
                 robot.forward(motor3,motor4, reverse=reversing)
-            time_count = corrections(robot, motor3, motor4, time_count=time_count)
+            elif now<=time_count-200:
+                time_count = corrections(robot, motor3, motor4, time_count=time_count)
             
         elif robot.mode_extra_specific=="move_turning":
                         # If this is coming from drop_off point
@@ -979,6 +1001,7 @@ def robot_mode_check(variables, now):
                 robot.mode=""
             elif drop_off_turn_count==1:
                 for i in range(10):
+                    print(tasks.rear_tof.poll())
                     if tasks.rear_tof.poll():
                         d = tasks.rear_distance_now()
                         if d is not None:
@@ -989,18 +1012,15 @@ def robot_mode_check(variables, now):
                         print("poll not polling")
                 readings.sort()
                 print(readings)
-                mean_scan=readings[int(len(readings)/2)]
+                mean_scan=readings[int(len(readings)/2)] if len(readings)>0 else 1000
                 
-                # ==========================
-                robot.stop(motor3, motor4)
-                is_started=False
-                return
+                
                 
                 print("DISTANCE MEASURED:"+str(mean_scan))
                 if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
                     # Use sensor to detect if box is there or not
                     print("NO BOX SEEN")
-                    utime.sleep_ms(1000)
+                    utime.sleep_ms(500)
                     skip_forward=True
                     robot.queue+=["drop_off", ["turning", "about", 90]]
                     robot.mode=""
@@ -1012,34 +1032,65 @@ def robot_mode_check(variables, now):
                     robot.mode=""
                     dropping_off=False
             elif drop_off_turn_count==2:
+                gripper_lift(servo1, servo2)
                 robot.mode_extra_specific="move_and_drop_off"
                 robot.forward(motor3,motor4)
                 time_count=now+c.DISTANCE_TO_DROP_POINT
         elif robot.mode_extra_specific=="move_and_drop_off":
             if now>=time_count:
                 robot.stop(motor3, motor4)
+                
+                utime.sleep_ms(100)
                 # Do the servo motions and moving, using sleep as well for moving forwards as 
                             # this needs to be hugely precise
                             # Drop off
                 robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
                 utime.sleep_ms(100)
-                release_box(servo2)
-                robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2, reverse=True)
+                robot.stop(motor3,motor4)
                 
-                servo1.move_slowly(gripper_end(servo1, config.GRIPPER_CARRY.get("servo1", "low")),
-                                       config.GRIPPER_STEP_MS)
-                servo2.move_slowly(gripper_end(servo2, config.GRIPPER_CARRY.get("servo2", "low")),
-                                       config.GRIPPER_STEP_MS)
+                release_box(servo2)
+                
+                robot.forward(motor3,motor4, 70, 70, reverse=True)
+                utime.sleep_ms(700)
+                
+                robot.stop(motor3,motor4)
+                
+                lowest = servo2.low - 10                
+                servo2.move_slowly(lowest, config.GRIPPER_STEP_MS, low=lowest)
+                
+                
+                robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
+                utime.sleep_ms(1400)
+                
+                
+                
+                robot.forward(motor3,motor4, 70, 70, reverse=True)
+                utime.sleep_ms(500)
+            
+            
+                gripper_safe(servo1, servo2)
+                
                 
                 
                 print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
                 robot.box_count+=1
                 robot.has_box=False
+                dropping_off=False
                             
                 map[robot.final_objective]["type"]="FILLED"
                             
                 robot.mode=""
+                robot.previous_position=robot.position
+                robot.position=robot.position.replace("JUNCTION_", "")
                 print("I AM AT: " +str(robot.position))
+                print("MY DIRECTION IS: "+ str(robot.direction))
+                
+                return variables, now
+            
+            if motor3.return_state() == 0 or motor4.return_state()==0:
+                robot.forward(motor3,motor4, reverse=reversing)
+            if now<time_count-400:
+                time_count = corrections(robot, motor3, motor4, time_count=time_count)
             
             
     
@@ -1086,6 +1137,7 @@ def robot_mode_check(variables, now):
                  turning,               #25
                  using_time,            #26
                  mean_scan,             #27
+                 holdoff_until_reverse, #28
                  )
     #condense and return new values of variables
 
@@ -1108,6 +1160,7 @@ def initialise_main_variables():
     count=0
     at_start=True
     mean_scan=100000
+    holdoff_until_reverse=0
     
     
     # ADDED (2026-10-15): state for the fixed turns.
@@ -1201,5 +1254,6 @@ def initialise_main_variables():
                  turning,               #25
                  using_time,            #26
                  mean_scan,             #27
+                 holdoff_until_reverse, #28
                  )
     return variables

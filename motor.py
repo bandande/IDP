@@ -69,6 +69,9 @@ def test_motors():
     # the sleep(1) calls still switches both motors off. Before, the wheels
     # kept turning after Ctrl-C until the Pico was reset.
     try:
+        print("About")
+        robot.about(motor3, motor4)
+        sleep(1)    
         print("Forward")
         robot.forward(motor3, motor4)
         sleep(1)
