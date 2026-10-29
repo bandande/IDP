@@ -5,6 +5,7 @@ from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_R
 import utime
 import config
 from control.task_sensors import TaskSensors
+from actuators.leds import StatusLeds
 import re
 import motor
 from actuators.servo import Servo
@@ -421,7 +422,13 @@ def wait_for_start(button):
 def button_check(variables):
     '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
     
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time , mean_scan, holdoff_until_reverse = variables
+    at_start, button, count, dropping_off, drop_off_turn_count,\
+    holdoff_until, is_started, left_old_line, map, motor3,\
+    motor4, movetime, moving, picking_up, readings,\
+    reversing, robot, scantime, sensors, servo1,\
+    servo2, skip_forward, tasks, time_count, traffic,\
+    turning, using_time , mean_scan, holdoff_until_reverse, leds,\
+    yellow_flash_timer = variables
     #retrieve variables            
 
     
@@ -529,20 +536,43 @@ def button_check(variables):
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     #condense and return new values of variables
 
     return variables
             
+def flashing_lights(robot, motor3, motor4, yellow_flash_timer, now, leds):
+    if now>yellow_flash_timer and (
+        motor3.return_state() != 0 or 
+        motor4.return_state() != 0 or
+        robot.mode == "pick_up" or
+        robot.mode == "drop_off"
+    ):
+        yellow_flash_timer = now + 250
+        if leds._pins.get("yellow").value()==1:
+            leds.show(yellow=False)
+        else:
+            leds.show(yellow=True)
+    return yellow_flash_timer, leds
 
 def robot_mode_check(variables, now):
     '''checks the current robot mode and takes action accordingly, transferred over from main while loop'''
 
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time, mean_scan, holdoff_until_reverse = variables
+    at_start, button, count, dropping_off, drop_off_turn_count,\
+    holdoff_until, is_started, left_old_line, map, motor3,\
+    motor4, movetime, moving, picking_up, readings,\
+    reversing, robot, scantime, sensors, servo1,\
+    servo2, skip_forward, tasks, time_count, traffic,\
+    turning, using_time , mean_scan, holdoff_until_reverse, leds,\
+    yellow_flash_timer = variables
     #retrieve variables            
 
     count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
 
+    
+    
     if robot.mode == "":
         next_item=robot.queue.pop()
                 
@@ -919,6 +949,15 @@ def robot_mode_check(variables, now):
                 # - no second reading here.
                 level = robot.pickup.level
                 robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                if level == "TOP":
+                    # Top means red is on and green is off
+                    leds.show(green=False)                        
+                    leds.show(red=True)
+                else:
+                    # Bottom means red is off and green is on
+                    leds.show(green=True)                        
+                    leds.show(red=False)
+                
                 map[robot.final_objective]["type"]="COLLECTED"
                 robot.has_box=True
                 robot.previous_position=robot.position
@@ -1086,6 +1125,10 @@ def robot_mode_check(variables, now):
                 print("I AM AT: " +str(robot.position))
                 print("MY DIRECTION IS: "+ str(robot.direction))
                 
+                # No more box so reset red and green
+                leds.show(green=False)                        
+                leds.show(red=False)
+                
                 return variables, now
             
             if motor3.return_state() == 0 or motor4.return_state()==0:
@@ -1139,6 +1182,8 @@ def robot_mode_check(variables, now):
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     #condense and return new values of variables
 
@@ -1162,6 +1207,7 @@ def initialise_main_variables():
     at_start=True
     mean_scan=100000
     holdoff_until_reverse=0
+    yellow_flash_timer=0
     
     
     # ADDED (2026-10-15): state for the fixed turns.
@@ -1192,6 +1238,8 @@ def initialise_main_variables():
     # magnet sensor's no-magnet zero point, so it runs here, in the start box,
     # before the start button is pressed (no box / magnet near the robot).
     tasks = TaskSensors.from_config()
+    
+    leds = StatusLeds.from_config()
 
     print("magnet sensor zero point: %s mV" % tasks.calibrate())
 
@@ -1256,5 +1304,7 @@ def initialise_main_variables():
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     return variables

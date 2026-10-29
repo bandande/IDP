@@ -14,6 +14,7 @@ from actuators.servo import Servo
 import re
 from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
 from control.start_stop import StartStopButton
+
 # ADDED (2026-10-20): the three task sensors (control/task_sensors.py):
 #   - magnet sensor: north / south pole of the box at pick-up -> rack level
 #   - front distance sensor: is the drop slot already full?
@@ -31,6 +32,7 @@ def main():
     #initialise all the variables, map, tasks, robot, sensors, motors, servos
     button = variables[1]
     now = utime.ticks_diff(utime.ticks_ms(), variables[16].start)
+    variables[29].show(yellow=True, red=False, green=False)
     
     f.wait_for_start(button)
     # ADDED (2026-10-26, test build): after the start press (nothing moves
@@ -82,8 +84,17 @@ def main():
                     "collect",
                                      
                 ]
-                
+            
+            
             variables, now = f.robot_mode_check(variables, now)
+            variables[30], variables[29] = f.flashing_lights(
+                robot=variables[16], 
+                motor3=variables[9], 
+                motor4=variables[10], 
+                yellow_flash_timer=variables[30], 
+                now=now, 
+                leds=variables[29],
+            )
             # Action
             
 
