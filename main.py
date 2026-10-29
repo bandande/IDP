@@ -14,6 +14,8 @@ from actuators.servo import Servo
 import re
 from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
 from control.start_stop import StartStopButton
+from actuators.leds import StatusLeds
+
 # ADDED (2026-10-20): the three task sensors (control/task_sensors.py):
 #   - magnet sensor: north / south pole of the box at pick-up -> rack level
 #   - front distance sensor: is the drop slot already full?
@@ -31,25 +33,26 @@ def main():
     #initialise all the variables, map, tasks, robot, sensors, motors, servos
     button = variables[1]
     now = utime.ticks_diff(utime.ticks_ms(), variables[16].start)
+    variables[29].show(yellow=True, red=False, green=False)
     
     f.wait_for_start(button)
     # ADDED (2026-10-26, test build): after the start press (nothing moves
     # before it) reset the gripper the safe way and set its carry pose.
     f.gripper_start(variables[19], variables[20])
-    f.grab_box(variables[19], variables[20])
+    # f.grab_box(variables[19], variables[20])
     
     variables[16].queue=[
         # "go_back",
         "deliver",
-        # "collect",
+        "collect",
                             
     ]
-    # variables[16].position = "JUNCTION_LEFT_BOTTOM"
-    # variables[16].objective = "FUNCTION_GREEN_1"
-    # variables[16].direction = "north"
-    variables[16].position = "JUNCTION_GREEN_2"
-    variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
+    variables[16].position = "JUNCTION_LEFT_BOTTOM"
+    variables[16].objective = "FUNCTION_GREEN_1"
     variables[16].direction = "north"
+    # variables[16].position = "JUNCTION_GREEN_2"
+    # variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
+    # variables[16].direction = "north"
     # variables[16].position = "START"
     # variables[16].objective = "START"
     # variables[16].direction = "north"
@@ -81,9 +84,11 @@ def main():
                     "deliver",
                     "collect",
                                      
-                ]
-                
+                ]+variables[16].queue
+            
+            
             variables, now = f.robot_mode_check(variables, now)
+            
             # Action
             
 
@@ -100,5 +105,7 @@ if __name__ == "__main__":
         for servo in [Servo(pin) for name, pin in config.SERVO_PINS.items()]:
             servo.set_angle(0)
             servo.off()
+        
+        StatusLeds.from_config().show(red=False, green=False, yellow=False)
 
         print("motors stopped")

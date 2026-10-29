@@ -5,6 +5,7 @@ from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_R
 import utime
 import config
 from control.task_sensors import TaskSensors
+from actuators.leds import StatusLeds
 import re
 import motor
 from actuators.servo import Servo
@@ -355,7 +356,9 @@ class Robot:
 def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c.TURN_SPEED, reverse=None, time_count=0):
     correction_motor_speed3=motor_speed3
     correction_motor_speed4=motor_speed4
-    if robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
+    if robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and robot.mode=="dropping_off":
+        pass
+    elif robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
         # If left front sensor does not detect and right does
         robot.queue.append(robot.mode)
         robot.mode="correction"
@@ -421,7 +424,13 @@ def wait_for_start(button):
 def button_check(variables):
     '''handles starting/stopping of robot due to button presses, transferred over from main while loop'''
     
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time , mean_scan, holdoff_until_reverse = variables
+    at_start, button, count, dropping_off, drop_off_turn_count,\
+    holdoff_until, is_started, left_old_line, map, motor3,\
+    motor4, movetime, moving, picking_up, readings,\
+    reversing, robot, scantime, sensors, servo1,\
+    servo2, skip_forward, tasks, time_count, traffic,\
+    turning, using_time , mean_scan, holdoff_until_reverse, leds,\
+    yellow_flash_timer = variables
     #retrieve variables            
 
     
@@ -529,20 +538,41 @@ def button_check(variables):
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     #condense and return new values of variables
 
     return variables
             
 
+
 def robot_mode_check(variables, now):
     '''checks the current robot mode and takes action accordingly, transferred over from main while loop'''
 
-    at_start, button, count, dropping_off, drop_off_turn_count, holdoff_until, is_started, left_old_line, map, motor3, motor4, movetime, moving, picking_up, readings, reversing, robot, scantime, sensors, servo1, servo2, skip_forward, tasks, time_count, traffic, turning, using_time, mean_scan, holdoff_until_reverse = variables
+    at_start, button, count, dropping_off, drop_off_turn_count,\
+    holdoff_until, is_started, left_old_line, map, motor3,\
+    motor4, movetime, moving, picking_up, readings,\
+    reversing, robot, scantime, sensors, servo1,\
+    servo2, skip_forward, tasks, time_count, traffic,\
+    turning, using_time , mean_scan, holdoff_until_reverse, leds,\
+    yellow_flash_timer = variables
     #retrieve variables            
 
     count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
 
+    if now>yellow_flash_timer and (
+        motor3.return_state() != 0 or 
+        motor4.return_state() != 0 or
+        robot.mode == "pick_up" or
+        robot.mode == "drop_off"
+    ):
+        yellow_flash_timer = now + 250
+        if leds._pins.get("yellow").value()==1:
+            leds.show(yellow=False)
+        else:
+            leds.show(yellow=True)
+    
     if robot.mode == "":
         next_item=robot.queue.pop()
                 
@@ -647,6 +677,8 @@ def robot_mode_check(variables, now):
                 
             elif next_item == "drop_off":
                 print("STUFFF")
+                print(robot.queue)
+                print(robot.mode)
                 print("DROP_OFF="+ str(dropping_off))  
                 print("extra_mode="+robot.mode_extra_specific)          
             elif next_item == "deliver":
@@ -747,7 +779,8 @@ def robot_mode_check(variables, now):
         
         if ((robot.left_sensor == 1 and robot.left_sensor_previous == 0)
             or (robot.right_sensor == 1 and robot.right_sensor_previous == 0)) \
-                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until:
+                and (not reversing or now >= holdoff_until_reverse) and now>=holdoff_until \
+                and robot.queue[-1]=="straight":
             # A junction has been detected
                     
             print("JUNCTION DETECTED")
@@ -858,7 +891,7 @@ def robot_mode_check(variables, now):
                     time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
                     robot.about(motor3,motor4, c.TURN_SPEED)
-                    time_count=now+turn_min*1.9
+                    time_count=now+turn_min*1.90
                 at_start=False
     
     
@@ -900,8 +933,15 @@ def robot_mode_check(variables, now):
             print("now")
             gripper_carry(variables[19], variables[20])
             utime.sleep_ms(1000)
-            robot.pickup = PickUp(robot, motor3, motor4, servo1, servo2, tasks,
-                                  config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left"))
+            robot.pickup = PickUp(
+                robot, 
+                motor3, 
+                motor4, 
+                servo1, 
+                servo2, 
+                tasks,
+                config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left")
+            )
             
             
             robot.pickup.start(now)
@@ -918,6 +958,15 @@ def robot_mode_check(variables, now):
                 # - no second reading here.
                 level = robot.pickup.level
                 robot.drop_off_info[1] = 1 if level == "TOP" else 0
+                if level == "TOP":
+                    # Top means red is on and green is off
+                    leds.show(green=False)                        
+                    leds.show(red=True)
+                else:
+                    # Bottom means red is off and green is on
+                    leds.show(green=True)                        
+                    leds.show(red=False)
+                
                 map[robot.final_objective]["type"]="COLLECTED"
                 robot.has_box=True
                 robot.previous_position=robot.position
@@ -987,6 +1036,7 @@ def robot_mode_check(variables, now):
                 robot.stop(motor3,motor4)
                 robot.mode_extra_specific="move_turning"
                 drop_off_turn_count=0
+                print("moving_turning")
             
             elif motor3.return_state() == 0 or motor4.return_state()==0:
                 robot.forward(motor3,motor4, reverse=reversing)
@@ -1000,19 +1050,20 @@ def robot_mode_check(variables, now):
                 robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
-                for i in range(10):
-                    print(tasks.rear_tof.poll())
-                    if tasks.rear_tof.poll():
-                        d = tasks.rear_distance_now()
-                        if d is not None:
-                            readings.append(d)
-                        else:
-                            print("d is none")
-                    else:
-                        print("poll not polling")
-                readings.sort()
-                print(readings)
-                mean_scan=readings[int(len(readings)/2)] if len(readings)>0 else 1000
+                utime.sleep_ms(500)
+                # CHANGED (2026-10-29): read the rear sensor for
+                # config.SLOT_READ_MS while standing still and take the median
+                # (TaskSensors.rear_distance). The old loop asked 10 times
+                # within a few ms, calling poll() twice per pass. The sensor
+                # only has a new value every config.TOF_PERIOD_MS (100 ms), so
+                # the second poll() always returned False ("poll not
+                # polling"), no reading was kept, and the slot was always
+                # seen as empty. It also crashed if the rear sensor was missing.
+                d = tasks.rear_distance()
+                print("rear sensor readings: %s" % tasks.last_rear_readings)
+                # No reading = nothing in range behind the robot = empty slot
+                # (the same 1000 as before when the list was empty).
+                mean_scan = d if d is not None else 1000
                 
                 robot.stop(motor3,motor4)
                 is_started=False
@@ -1039,7 +1090,7 @@ def robot_mode_check(variables, now):
                 robot.forward(motor3,motor4)
                 time_count=now+c.DISTANCE_TO_DROP_POINT
         elif robot.mode_extra_specific=="move_and_drop_off":
-            if now>=time_count:
+            if now>=time_count or (robot.drop_off_info[1]==1 and (robot.front_left_sensor == 0 and robot.front_right_sensor == 0)):
                 robot.stop(motor3, motor4)
                 
                 utime.sleep_ms(100)
@@ -1073,9 +1124,9 @@ def robot_mode_check(variables, now):
                 gripper_safe(servo1, servo2)
                 
                 
-                
-                print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
                 robot.box_count+=1
+
+                print("EVERYTHING IS DROPPED OFF. COUNT: "+str(robot.box_count))
                 robot.has_box=False
                 dropping_off=False
                             
@@ -1087,12 +1138,17 @@ def robot_mode_check(variables, now):
                 print("I AM AT: " +str(robot.position))
                 print("MY DIRECTION IS: "+ str(robot.direction))
                 
-                return variables, now
-            
-            if motor3.return_state() == 0 or motor4.return_state()==0:
-                robot.forward(motor3,motor4, reverse=reversing)
-            if now<time_count-400:
-                time_count = corrections(robot, motor3, motor4, time_count=time_count)
+                # No more box so reset red and green
+                leds.show(green=False)                        
+                leds.show(red=False)
+                
+                
+                
+            else:
+                if motor3.return_state() == 0 or motor4.return_state()==0:
+                    robot.forward(motor3,motor4, reverse=reversing)
+                if now<time_count-800:
+                    time_count = corrections(robot, motor3, motor4, time_count=time_count)
             
             
     
@@ -1140,6 +1196,8 @@ def robot_mode_check(variables, now):
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     #condense and return new values of variables
 
@@ -1163,6 +1221,7 @@ def initialise_main_variables():
     at_start=True
     mean_scan=100000
     holdoff_until_reverse=0
+    yellow_flash_timer=0
     
     
     # ADDED (2026-10-15): state for the fixed turns.
@@ -1193,6 +1252,8 @@ def initialise_main_variables():
     # magnet sensor's no-magnet zero point, so it runs here, in the start box,
     # before the start button is pressed (no box / magnet near the robot).
     tasks = TaskSensors.from_config()
+    
+    leds = StatusLeds.from_config()
 
     print("magnet sensor zero point: %s mV" % tasks.calibrate())
 
@@ -1257,5 +1318,7 @@ def initialise_main_variables():
                  using_time,            #26
                  mean_scan,             #27
                  holdoff_until_reverse, #28
+                 leds,                  #29
+                 yellow_flash_timer,    #30
                  )
     return variables

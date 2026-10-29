@@ -121,6 +121,30 @@ class PickUp:
         self._left_line = False       # "u_turn": True once both centre sensors were black
         self._last_reading_ms = 0     # ADDED (2026-10-27) "to_box": now_ms of the last real distance
 
+    def reset(self):
+        print("BIG RESET")
+        # The public state, read by main.py and the simulator check.
+        self.phase = "idle"
+        self.ok = False
+        self.message = ""
+        self.last_distance_mm = None
+        # ADDED (2026-10-27): the box's magnet, read right after the grab
+        # (box held next to the magnet sensor): "north" / "south" / None, and
+        # the rack level it means (config.MAG_POLE_LEVEL). For now it is only
+        # REPORTED; the robot does not yet turn left / right because of it.
+        self.pole = None
+        self.level = None
+
+        # Internal state (the leading underscore means "only used in here").
+        self._phase_start_ms = 0      # now_ms when the present phase began (for its time limit)
+        self._confirm_count = 0       # sensor pattern seen this many update() calls in a row
+        self._left_speed = config.PICKUP_FOLLOW_SPEED    # the last line-following command,
+        self._right_speed = config.PICKUP_FOLLOW_SPEED   # kept while both centre sensors are black
+        self._box_gripped = False     # "grab": True once grab_box() has finished
+        self._left_line = False       # "u_turn": True once both centre sensors were black
+        self._last_reading_ms = 0     # ADDED (2026-10-27) "to_box": now_ms of the last real distance
+
+    
     # -----------------------------------------------------------------
     # The two methods main.py calls
     # -----------------------------------------------------------------
@@ -130,6 +154,7 @@ class PickUp:
         CHANGED (2026-10-27): with no grab sensor it ends at once as "failed"
         (the next update() returns True and the robot never moves)."""
         self.ok = False
+        self.distance=10000
         self.message = ""
         self.last_distance_mm = None
         self.pole = None              # ADDED (2026-10-27)
@@ -163,6 +188,8 @@ class PickUp:
             self._update_to_cross_line(now_ms)
         elif self.phase == "to_box":
             self._update_to_box(now_ms)
+        elif self.phase == "manual_move":
+            self._update_manual_move(now_ms)
         elif self.phase == "grab":
             self._update_grab(now_ms)
         elif self.phase == "reverse":            
@@ -198,7 +225,10 @@ class PickUp:
             # CHANGED (2026-10-27): let _update_to_box() send the first drive
             # command, so a missing grab sensor stops the robot before it
             # moves towards the box at all.
+            
+            print("LLALALALAL")
             self._update_to_box(now_ms)
+            
             return
         if self._time_is_up(now_ms, config.PICKUP_TO_CROSS_MAX_MS):
             self._fail(now_ms, "no cross line within %d ms" % config.PICKUP_TO_CROSS_MAX_MS)
@@ -224,6 +254,7 @@ class PickUp:
         # CHANGED (2026-10-27): the GRAB sensor (front, through the gripper,
         # config.GRAB_TOF) - the only sensor used at the pick-up
         distance = self.tasks.box_distance_now()   # non-blocking, mm or None
+        print(distance)
         self.last_distance_mm = distance
         
 
@@ -246,16 +277,34 @@ class PickUp:
         elif now_ms - self._last_reading_ms >= config.GRAB_NO_READING_MAX_MS:
             self._fail(now_ms, "no distance from the grab sensor for %d ms (not answering, or no box in range)"
                        % (now_ms - self._last_reading_ms))
+            
             return
 
         if self._time_is_up(now_ms, config.GRAB_APPROACH_MAX_MS):
             self._fail(now_ms, "no box within %d mm after %d ms"
                        % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
+            
+            if self._last_reading_ms>=config.GRAB_APPROACH_MAX_MS-100:
+                print("CONTINUING")
+                self._last_reading_ms = now_ms
+                self._drive_straight_to_box()
+                self._change_phase("manual_move", now_ms, "manual move for box")
+            else:
+                print("some readings received but still failed")
             return
 
         # Not there yet: keep driving straight (sent again every call, so
         # the wheels always do what this phase wants).
         self._drive_straight_to_box()
+    
+    def _update_manual_move(self, now_ms):
+        # In case the box is not detected, then continue anyways
+        self._drive_straight_to_box()
+        if now_ms>self._last_reading_ms+constants.DISTANCE_TO_SCAN_PICK_UP:
+            self.robot.stop(self.motor3, self.motor4)
+            self._change_phase("grab", now_ms, "grab for box after manual")
+        
+        
 
     def _update_grab(self, now_ms):
         """Step 3: pick the box up, then start the U-turn.
@@ -339,6 +388,7 @@ class PickUp:
             self.ok = True
             self._change_phase("done", now_ms, None)
             self.message = "back on the main line"
+            print(self.tasks.grab_tof.poll())
             return
 
         if self._time_is_up(now_ms, config.PICKUP_BACK_MAX_MS):
