@@ -197,7 +197,7 @@ if __name__ == "__main__":
         process_noise_q=15.0, 
         sigma_mult=3.0, 
         alpha_drift=0.0008,
-        hold_target_sec=2.0
+        hold_target_sec=0.5
     )
     
     detector.calibrate()

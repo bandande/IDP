@@ -17,7 +17,7 @@ MAP = {
 
     "TOP_CENTRE": {
         "type": "FOUR_JUNCTION",
-        "north": "RAMP",
+        "north": "JUNCTION_TOP_DROP_1",
         "south": "START",
         "east": "TOP_RIGHT",
         "west": "TOP_LEFT",
@@ -77,14 +77,6 @@ MAP = {
         "south": None,
         "east": None,
         "west": "BOTTOM_CENTRE",
-    },
-    
-    "RAMP": {
-        "type": "STRAIGHT",
-        "north": "JUNCTION_TOP_DROP_1",
-        "south": "TOP_CENTRE",
-        "east": None,
-        "west": None,
     },
 
 
@@ -444,7 +436,7 @@ MAP = {
     "JUNCTION_TOP_DROP_1": {
         "type": "FOUR_JUNCTION",
         "north": "JUNCTION_TOP_DROP_2",
-        "south": "RAMP",
+        "south": "TOP_CENTRE",
         "east": "RIGHT_TOP_DROP_1",
         "west": "LEFT_TOP_DROP_1",
     },

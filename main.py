@@ -25,6 +25,15 @@ from actuators.leds import StatusLeds
 # and its check uses a safe fallback.
 from control.task_sensors import TaskSensors
 import constants as c
+import os
+#Clear logfile?
+logfile = open('print_log.txt', 'w')
+logfile.close()
+
+logfile = open('print_log.txt', 'a')
+os.dupterm(logfile)
+print("This will be saved to print_log.txt even if unplugged!")
+
 
 
 def main():
@@ -40,6 +49,7 @@ def main():
     # before it) reset the gripper the safe way and set its carry pose.
     f.gripper_start(variables[19], variables[20])
     # f.grab_box(variables[19], variables[20])
+    # f.grab_finish_box(variables[19], variables[20])
     
     variables[16].queue=[
         # "go_back",
@@ -47,15 +57,15 @@ def main():
         "collect",
                             
     ]
-    variables[16].position = "JUNCTION_LEFT_BOTTOM"
-    variables[16].objective = "FUNCTION_GREEN_1"
-    variables[16].direction = "north"
+    # variables[16].position = "JUNCTION_LEFT_BOTTOM"
+    # variables[16].objective = "FUNCTION_GREEN_1"
+    # variables[16].direction = "north"
     # variables[16].position = "JUNCTION_GREEN_2"
     # variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
     # variables[16].direction = "north"
-    # variables[16].position = "START"
-    # variables[16].objective = "START"
-    # variables[16].direction = "north"
+    variables[16].position = "START"
+    variables[16].objective = "START"
+    variables[16].direction = "north"
     
     
     #start running

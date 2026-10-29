@@ -60,7 +60,9 @@ ticks_diff needed).
 
 import config
 import constants
-from actuators.gripper import grab_box
+from actuators.gripper import grab_box, grab_finish_box
+from sensors.magnetic_confidence import detect_magnet_pole
+
 
 # CHANGED (2026-10-27): the "no distance reading" limit of "to_box" is now
 # config.GRAB_NO_READING_MAX_MS (500 ms, next to the other GRAB_* values;
@@ -134,6 +136,7 @@ class PickUp:
         # REPORTED; the robot does not yet turn left / right because of it.
         self.pole = None
         self.level = None
+        self.confidence = 0
 
         # Internal state (the leading underscore means "only used in here").
         self._phase_start_ms = 0      # now_ms when the present phase began (for its time limit)
@@ -226,7 +229,6 @@ class PickUp:
             # command, so a missing grab sensor stops the robot before it
             # moves towards the box at all.
             
-            print("LLALALALAL")
             self._update_to_box(now_ms)
             
             return
@@ -254,7 +256,6 @@ class PickUp:
         # CHANGED (2026-10-27): the GRAB sensor (front, through the gripper,
         # config.GRAB_TOF) - the only sensor used at the pick-up
         distance = self.tasks.box_distance_now()   # non-blocking, mm or None
-        print(distance)
         self.last_distance_mm = distance
         
 
@@ -265,8 +266,7 @@ class PickUp:
             self.robot.stop(self.motor3, self.motor4)
             self._change_phase("grab", now_ms, "box %d mm ahead" % distance)
             return
-        else:
-            print("DISTANCE IS NONE")
+
 
         # ADDED (2026-10-27): None = no distance this time (the sensor did
         # not answer, its reading is too old, or nothing is in range). A few
@@ -324,14 +324,33 @@ class PickUp:
         if not self._box_gripped:
             self.robot.stop(self.motor3, self.motor4)   # make sure the wheels stand still
             grab_box(self.servo1, self.servo2)
+            
+            # Magnetic sensor
+            confidence=0
+            level=""
+            for i in range(10):
+                level, confidence = detect_magnet_pole(adc_pin=26, duration_sec=0.5)
+                if confidence>0.8:
+                    break
+                else:
+                    print("Confidence too low, try again")
+            print("level:"+str(level) +"\t confidence:"+ str(confidence))
+            
+            self.level=level
+            self.confidence=confidence
+            
+            grab_finish_box(self.servo1, self.servo2)
             # ADDED (2026-10-27): read the box's magnet now, while the robot
             # stands still and the box is held next to the sensor (blocks
             # config.MAG_READ_MS). Only reported for now: later the robot
             # will turn left / right on the main line depending on it.
+            
+            
+            
             self.pole = self.tasks.read_pole()
-            self.level = self.tasks.level_for_pole(self.pole)
-            print("pickup: box magnet %s (strongest field %s mV) -> rack level %s"
-                  % (self.pole.upper() if self.pole else "NOT FOUND", self.tasks.last_field_mv, self.level))
+            # self.level = self.tasks.level_for_pole(self.pole)
+            # print("pickup: box magnet %s (strongest field %s mV) -> rack level %s"
+            #         % (self.pole.upper() if self.pole else "NOT FOUND", self.tasks.last_field_mv, self.level))
             self._box_gripped = True
             return
 

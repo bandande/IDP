@@ -80,8 +80,19 @@ def gripper_start(servo1, servo2):
 def grab_box(servo1, servo2):
     """Pick the box up, standing in front of it: servo1 down to its low end,
     servo2 down to its low end (gripper closes), servo1 up to its high end."""
-    for servo, end, what in ((servo1, "low", "arm down"), (servo2, "low", "gripper closed"),
-                             (servo1, "medium", "arm up")):
+    for servo, end, what in (
+            (servo1, "low", "arm down"), 
+            (servo2, "low", "gripper closed"),
+            # (servo1, "medium", "arm up")
+        ):
+        servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
+        print("gripper: %s (%s deg)" % (what, servo.angle()))
+        utime.sleep_ms(config.GRIPPER_PAUSE_MS)
+
+def grab_finish_box(servo1, servo2):
+    """Pick the box up, standing in front of it: servo1 down to its low end,
+    servo2 down to its low end (gripper closes), servo1 up to its high end."""
+    for servo, end, what in [(servo1, "medium", "arm up")]:
         servo.move_slowly(gripper_end(servo, end), config.GRIPPER_STEP_MS)
         print("gripper: %s (%s deg)" % (what, servo.angle()))
         utime.sleep_ms(config.GRIPPER_PAUSE_MS)
