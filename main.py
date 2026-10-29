@@ -14,6 +14,7 @@ from actuators.servo import Servo
 import re
 from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
 from control.start_stop import StartStopButton
+from actuators.leds import StatusLeds
 
 # ADDED (2026-10-20): the three task sensors (control/task_sensors.py):
 #   - magnet sensor: north / south pole of the box at pick-up -> rack level
@@ -38,23 +39,23 @@ def main():
     # ADDED (2026-10-26, test build): after the start press (nothing moves
     # before it) reset the gripper the safe way and set its carry pose.
     f.gripper_start(variables[19], variables[20])
-    f.grab_box(variables[19], variables[20])
+    # f.grab_box(variables[19], variables[20])
     
     variables[16].queue=[
         # "go_back",
         "deliver",
-        # "collect",
+        "collect",
                             
     ]
-    # variables[16].position = "JUNCTION_LEFT_BOTTOM"
-    # variables[16].objective = "FUNCTION_GREEN_1"
-    # variables[16].direction = "north"
+    variables[16].position = "JUNCTION_LEFT_BOTTOM"
+    variables[16].objective = "FUNCTION_GREEN_1"
+    variables[16].direction = "north"
     # variables[16].position = "JUNCTION_GREEN_2"
     # variables[16].objective = "JUNCTION_LEFT_BOTTOM_DROP_1"
     # variables[16].direction = "north"
-    variables[16].position = "START"
-    variables[16].objective = "START"
-    variables[16].direction = "north"
+    # variables[16].position = "START"
+    # variables[16].objective = "START"
+    # variables[16].direction = "north"
     
     
     #start running
@@ -83,18 +84,11 @@ def main():
                     "deliver",
                     "collect",
                                      
-                ]
+                ]+variables[16].queue
             
             
             variables, now = f.robot_mode_check(variables, now)
-            variables[30], variables[29] = f.flashing_lights(
-                robot=variables[16], 
-                motor3=variables[9], 
-                motor4=variables[10], 
-                yellow_flash_timer=variables[30], 
-                now=now, 
-                leds=variables[29],
-            )
+            
             # Action
             
 
@@ -111,5 +105,7 @@ if __name__ == "__main__":
         for servo in [Servo(pin) for name, pin in config.SERVO_PINS.items()]:
             servo.set_angle(0)
             servo.off()
+        
+        StatusLeds.from_config().show(red=False, green=False, yellow=False)
 
         print("motors stopped")
