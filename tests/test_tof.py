@@ -31,11 +31,14 @@ from sensors.tof import tof_from_config
 
 def test_tof(seconds=None):
     tofs = tof_from_config()
-    while True:
-        for name, s in tofs.items():
-            # print("%s: address 0x%02X available %s %s" % (
-            #     name, s.address, s.available, "" if s.available else s.last_error))
-            print(s.processor.value)
+    # CHANGED (2026-10-29): the endless "print(s.processor.value)" loop that
+    # was here never asked the sensors for new values (no poll()), so it
+    # only printed None and the real test below was never reached. The
+    # loop below prints the filtered distance (and raw value / status)
+    # every 100 ms, which is what that loop was meant to show.
+    for name, s in tofs.items():
+        print("%s: address 0x%02X available %s %s" % (
+            name, s.address, s.available, "" if s.available else s.last_error))
     start = ticks_ms()
     last_print = start
     while seconds is None or ticks_diff(ticks_ms(), start) < seconds * 1000:
@@ -46,8 +49,9 @@ def test_tof(seconds=None):
             last_print = now
             parts = []
             for name, s in tofs.items():
-                parts.append("%s: %s mm (raw %s, status %s, errors %d)" % (
-                    name, s.get_distance(now), s.raw_mm, s.range_status, s.error_count))
+                # CHANGED (2026-10-29): also the number of automatic restarts
+                parts.append("%s: %s mm (raw %s, status %s, errors %d, restarts %d)" % (
+                    name, s.get_distance(now), s.raw_mm, s.range_status, s.error_count, s.restart_count))
             print("   ".join(parts))
         sleep_ms(5)
 

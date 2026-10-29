@@ -42,6 +42,15 @@ from utime import ticks_ms, ticks_diff, sleep_ms
 
 import config
 
+# ADDED (2026-10-29): box_distance_now() prints its DEBUG line at most this
+# often (ms), instead of on every call.
+DEBUG_PRINT_MS = 200
+# ADDED (2026-10-29): the blocking distance reads below (slot_occupied,
+# rear_distance, box_distance) ask the sensor every TOF_POLL_MS (was every
+# 5 ms). The sensor itself measures once every config.TOF_PERIOD_MS (100 ms),
+# so this still catches every new value within 25 ms.
+TOF_POLL_MS = 25
+
 
 def make_magnet():
     from sensors.magnetic import HallSensor
@@ -102,7 +111,11 @@ class TaskSensors:
         self.last_field_mv = None     # strongest field seen by the last read_pole()
         self.last_slot_mm = None      # median distance of the last slot_occupied()
         self.last_box_mm = None       # median distance of the last box_distance()
-        self._ir_seen = None          # light_update(): time of the last IR activity
+        # ADDED (2026-10-29): every reading kept by the last rear_distance() (for printing)
+        self.last_rear_readings = []
+        # ADDED (2026-10-29): when box_distance_now() last printed its DEBUG line
+        self._debug_print_ms = None
+        self._ir_seen = None         # light_update(): time of the last IR activity
         self._ir_on_since = None      # light_update(): start of the current unbroken IR stretch
         self._light_start = None
         self._last_light = None
@@ -181,7 +194,7 @@ class TaskSensors:
                 d = self.rear_tof.get_distance()
                 if d is not None:
                     readings.append(d)
-            sleep_ms(5)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
         if not readings:
             return False      # nothing within range: the slot is open / empty
         self.last_slot_mm = _median(readings)
@@ -202,22 +215,66 @@ class TaskSensors:
         or None (nothing in range, reading too old, or no grab sensor). Call it
         every loop while the robot moves (the sensor gives ~10 new values / s,
         one every config.TOF_PERIOD_MS - CHANGED 2026-10-27, was ~30 / s)."""
+        # CHANGED (2026-10-29): the DEBUG lines are kept, but printed at most
+        # once every DEBUG_PRINT_MS. Before, they were printed on EVERY call
+        # (every loop, many times per new reading): that floods the serial
+        # port and slows the main loop down.
+        now = ticks_ms()
+        print_now = self._debug_print_ms is None or ticks_diff(now, self._debug_print_ms) >= DEBUG_PRINT_MS
+        if print_now:
+            self._debug_print_ms = now
         if self.grab_tof is None:
-            print("DEBUG: grab_tof is None")
+            if print_now:
+                print("DEBUG: grab_tof is None")
             return None
 
-        result = self.grab_tof.poll()
-        distance = self.grab_tof.get_distance()
-        print("DEBUG:", result, distance)
+        result = self.grab_tof.poll(now)
+        distance = self.grab_tof.get_distance(now)
+        if print_now:
+            # True = a new reading came in at this call, then the distance (mm or None)
+            print("DEBUG:", result, distance)
         return distance
 
     def rear_distance_now(self):
-
+        """Non-blocking: the newest filtered distance (mm) from the rear
+        sensor, or None (nothing in range, reading too old, or no rear sensor)."""
         if self.rear_tof is None:
-            print("none you stupid boy")
+            # CHANGED (2026-10-29): clearer message
+            print("rear distance sensor not available")
             return None
         self.rear_tof.poll()
         return self.rear_tof.get_distance()
+
+    def rear_distance(self, read_ms=None):
+        """ADDED (2026-10-29): Blocking: the median distance (mm) seen by the
+        rear sensor during read_ms (default config.SLOT_READ_MS), or None if
+        nothing was in range (or there is no rear sensor). Use it while the
+        robot stands still, e.g. to check a drop slot behind the robot.
+
+        The sensor only has a NEW value every config.TOF_PERIOD_MS (100 ms),
+        so the readings must be collected over some time: asking 10 times
+        in a row (a few ms) gives at most one value, usually none.
+        The sensor's own median filter is cleared first, so values measured
+        while the robot was still turning are not used.
+        Every value kept is in self.last_rear_readings (for printing)."""
+        self.last_rear_readings = []
+        self.last_slot_mm = None
+        if self.rear_tof is None:
+            print("rear distance sensor not available")
+            return None
+        if read_ms is None:
+            read_ms = config.SLOT_READ_MS
+        self.rear_tof.processor.reset()     # forget the readings from before this check
+        start = ticks_ms()
+        while ticks_diff(ticks_ms(), start) < read_ms:
+            if self.rear_tof.poll():
+                d = self.rear_tof.get_distance()
+                if d is not None:
+                    self.last_rear_readings.append(d)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
+        if self.last_rear_readings:
+            self.last_slot_mm = _median(self.last_rear_readings)
+        return self.last_slot_mm
 
     def box_distance(self, read_ms=None):
         """Blocking: the median distance (mm) seen by the grab sensor during
@@ -235,7 +292,7 @@ class TaskSensors:
                 d = self.grab_tof.get_distance()
                 if d is not None:
                     readings.append(d)
-            sleep_ms(5)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
         if readings:
             self.last_box_mm = _median(readings)
         return self.last_box_mm

@@ -194,7 +194,10 @@ MAG_NO_POLE_LEVEL = "BOTTOM"   # level used when no magnet is found
 #              straight back to the main line.
 # (There is no "front sensor for driving" any more: FRONT_TOF was renamed.)
 REAR_TOF = "dist2"             # back of the robot (physical 1 / 15): drop slot empty / full
-SLOT_READ_MS = 250             # collect readings this long when checking a slot
+SLOT_READ_MS = 500             # collect readings this long when checking a slot
+                               # CHANGED (2026-10-29, was 250): at one new value
+                               # every TOF_PERIOD_MS (100 ms) this gives ~5 readings
+                               # for the median instead of ~2
 SLOT_OCCUPIED_MM = 170         # TODO measure: a box in the slot reads closer than this (rear sensor)
 GRAB_TOF = "dist1"             # front, through the gripper (physical 4 / 22): the box at a pick-up
 GRAB_READ_MS = 150             # box_distance(): collect readings this long (robot standing still)

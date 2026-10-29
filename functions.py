@@ -1050,20 +1050,19 @@ def robot_mode_check(variables, now):
                 robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
-                utime.sleep_ms(500)
-                for i in range(10):
-                    print(tasks.rear_tof.poll())
-                    # if tasks.rear_tof.poll():
-                    d = tasks.rear_distance_now()
-                    if d is not None:
-                        readings.append(d)
-                    else:
-                        print("d is none")
-                    # else:
-                    #     print("poll not polling")
-                readings.sort()
-                print(readings)
-                mean_scan=readings[int(len(readings)/2)] if len(readings)>0 else 1000
+                # CHANGED (2026-10-29): read the rear sensor for
+                # config.SLOT_READ_MS while standing still and take the median
+                # (TaskSensors.rear_distance). The old loop asked 10 times
+                # within a few ms, calling poll() twice per pass. The sensor
+                # only has a new value every config.TOF_PERIOD_MS (100 ms), so
+                # the second poll() always returned False ("poll not
+                # polling"), no reading was kept, and the slot was always
+                # seen as empty. It also crashed if the rear sensor was missing.
+                d = tasks.rear_distance()
+                print("rear sensor readings: %s" % tasks.last_rear_readings)
+                # No reading = nothing in range behind the robot = empty slot
+                # (the same 1000 as before when the list was empty).
+                mean_scan = d if d is not None else 1000
                 
                 
                 
