@@ -27,6 +27,10 @@ Data processing
     samples gives None.
   * distance_mm is None when there is no target, the sensor is unavailable,
     or the newest sample is older than stale_ms.
+  * ADDED (2026-10-29): if poll() was not called for longer than stale_ms,
+    the next poll() first throws all old readings away (median filter and
+    the sample waiting in the sensor), so a new read-out never starts with
+    values from the last one.
   * If distance_mm stays None while raw_mm looks right, check range_status;
     require_valid_status=False disables the status check.
 
@@ -272,6 +276,15 @@ class ToFSensor:
             if self._started_once and self._restart_allowed(now_ms):
                 self._restart(now_ms, "it could not be restarted last time")
             return False
+        # ADDED (2026-10-29): nobody asked this sensor for longer than
+        # stale_ms (e.g. the grab sensor between two pick-ups: it is only
+        # read while driving up to a box). Everything it still holds is old,
+        # so throw it away first (see _forget_old_readings) and wait for a
+        # fresh measurement. Without this, the second pick-up got the
+        # distance of the FIRST one.
+        if self._last_check_ms is not None and ticks_diff(now_ms, self._last_check_ms) > self.stale_ms:
+            self._forget_old_readings(now_ms)
+            return False
         # ADDED (2026-10-27): in timed mode a new result only comes every
         # period_ms, so ask the sensor at most every period_ms / 2 (less I2C
         # traffic; asking every 5 ms loop only found "not ready" anyway).
@@ -297,6 +310,34 @@ class ToFSensor:
         raw_mm = (self._result[10] << 8) | self._result[11]
         self.processor.update(raw_mm, status, now_ms)
         return True
+
+    # ADDED (2026-10-29): called by poll() when the sensor was not asked for
+    # longer than stale_ms.
+    def _forget_old_readings(self, now_ms):
+        """Throw away every old reading, so the next distance is a NEW one.
+
+        Two things hold old readings:
+          1. The median filter (self.processor) keeps the last 3 readings.
+             Example: the first pick-up ended with the box at 45 mm, so the
+             filter holds e.g. [48, 45, 20]. At the next pick-up the first
+             new reading (say 300 mm) gives median(45, 20, 300) = 45 mm:
+             the OLD distance, and it even looks fresh (its time is "now").
+             -> processor.reset() empties the filter (get_distance() is
+             None until the next reading).
+          2. The sensor itself: a measurement waiting in it may be from long
+             ago (nobody read it). -> Clearing its "new value" flag throws it
+             away; the next flag means a measurement made from now on (one
+             comes every period_ms, about 100 ms).
+        This costs one measurement period (about 0.1 s) at the start of each
+        read-out, which is why it is only done after a long pause."""
+        self._last_check_ms = now_ms
+        self._waiting_since = None    # the pause is not "no new value" (no restart because of it)
+        self.processor.reset()
+        try:
+            self.i2c.writeto_mem(self.address, _REG_INTERRUPT_CLEAR, b"\x01")
+        except OSError as e:
+            self._record_error(e)
+            self._no_new_value(now_ms)
 
     # ADDED (2026-10-29): the automatic restart (see poll()).
     # The sensor measures all the time (one value every period_ms, also when
