@@ -45,6 +45,11 @@ import config
 # ADDED (2026-10-29): box_distance_now() prints its DEBUG line at most this
 # often (ms), instead of on every call.
 DEBUG_PRINT_MS = 200
+# ADDED (2026-10-29): the blocking distance reads below (slot_occupied,
+# rear_distance, box_distance) ask the sensor every TOF_POLL_MS (was every
+# 5 ms). The sensor itself measures once every config.TOF_PERIOD_MS (100 ms),
+# so this still catches every new value within 25 ms.
+TOF_POLL_MS = 25
 
 
 def make_magnet():
@@ -189,7 +194,7 @@ class TaskSensors:
                 d = self.rear_tof.get_distance()
                 if d is not None:
                     readings.append(d)
-            sleep_ms(5)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
         if not readings:
             return False      # nothing within range: the slot is open / empty
         self.last_slot_mm = _median(readings)
@@ -266,7 +271,7 @@ class TaskSensors:
                 d = self.rear_tof.get_distance()
                 if d is not None:
                     self.last_rear_readings.append(d)
-            sleep_ms(5)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
         if self.last_rear_readings:
             self.last_slot_mm = _median(self.last_rear_readings)
         return self.last_slot_mm
@@ -287,7 +292,7 @@ class TaskSensors:
                 d = self.grab_tof.get_distance()
                 if d is not None:
                     readings.append(d)
-            sleep_ms(5)
+            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
         if readings:
             self.last_box_mm = _median(readings)
         return self.last_box_mm
