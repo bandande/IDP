@@ -163,6 +163,8 @@ class PickUp:
             self._update_to_cross_line(now_ms)
         elif self.phase == "to_box":
             self._update_to_box(now_ms)
+        elif self.phase == "manual_move":
+            self._update_manual_move(now_ms)
         elif self.phase == "grab":
             self._update_grab(now_ms)
         elif self.phase == "reverse":            
@@ -246,16 +248,34 @@ class PickUp:
         elif now_ms - self._last_reading_ms >= config.GRAB_NO_READING_MAX_MS:
             self._fail(now_ms, "no distance from the grab sensor for %d ms (not answering, or no box in range)"
                        % (now_ms - self._last_reading_ms))
+            
             return
 
         if self._time_is_up(now_ms, config.GRAB_APPROACH_MAX_MS):
             self._fail(now_ms, "no box within %d mm after %d ms"
                        % (config.GRAB_STOP_MM, config.GRAB_APPROACH_MAX_MS))
+            
+            if self._last_reading_ms>=config.GRAB_APPROACH_MAX_MS-100:
+                print("CONTINUING")
+                self._last_reading_ms = now_ms
+                self._drive_straight_to_box()
+                self._change_phase("manual_move", now_ms, "manual move for box")
+            else:
+                print("some readings received but still failed")
             return
 
         # Not there yet: keep driving straight (sent again every call, so
         # the wheels always do what this phase wants).
         self._drive_straight_to_box()
+    
+    def _update_manual_move(self, now_ms):
+        # In case the box is not detected, then continue anyways
+        self._drive_straight_to_box()
+        if now_ms>self._last_reading_ms+constants.DISTANCE_TO_SCAN_PICK_UP:
+            self.robot.stop(self.motor3, self.motor4)
+            self._change_phase("grab", now_ms, "grab for box after manual")
+        
+        
 
     def _update_grab(self, now_ms):
         """Step 3: pick the box up, then start the U-turn.
