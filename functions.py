@@ -1050,6 +1050,7 @@ def robot_mode_check(variables, now):
                 robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
+                utime.sleep_ms(500)
                 # CHANGED (2026-10-29): read the rear sensor for
                 # config.SLOT_READ_MS while standing still and take the median
                 # (TaskSensors.rear_distance). The old loop asked 10 times
