@@ -1014,7 +1014,9 @@ def robot_mode_check(variables, now):
                 print(readings)
                 mean_scan=readings[int(len(readings)/2)] if len(readings)>0 else 1000
                 
-                
+                robot.stop(motor3,motor4)
+                is_started=False
+                return
                 
                 print("DISTANCE MEASURED:"+str(mean_scan))
                 if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
