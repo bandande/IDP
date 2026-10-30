@@ -84,7 +84,7 @@ def _speed_at_least_1(speed):
 
 
 class PickUp:
-    def __init__(self, robot, motor3, motor4, servo1, servo2, tasks, uturn_direction="left"):
+    def __init__(self, robot, motor3, motor4, servo1, servo2, tasks, leds, uturn_direction="left"):
         """robot: functions.Robot (line sensor attributes, forward/spin/stop).
         uturn_direction: ADDED (2026-10-27) "left" or "right", the way to spin
         for the U-turn - away from the neighbouring box's line (see
@@ -100,6 +100,7 @@ class PickUp:
         self.servo1 = servo1
         self.servo2 = servo2
         self.tasks = tasks
+        self.leds = leds
 
 
         # The public state, read by main.py and the simulator check.
@@ -347,6 +348,15 @@ class PickUp:
             
             self.level=level
             self.confidence=confidence
+            
+            if level == "N":
+                # Top means red is on and green is off
+                self.leds.show(green=False)                        
+                self.leds.show(red=True)
+            else:
+                # Bottom means red is off and green is on
+                self.leds.show(green=True)                        
+                self.leds.show(red=False)
             
             grab_finish_box(self.servo1, self.servo2)
             # ADDED (2026-10-27): read the box's magnet now, while the robot

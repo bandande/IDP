@@ -95,7 +95,7 @@ DRIVE_SPEED = 90
 # NODE_FORWARD_MS = 1600
 # TURN_MIN_MS = 1800
 
-NODE_FORWARD_MS = 800
+NODE_FORWARD_MS = 790
 TURN_MIN_MS = 800
 TURN_SPEED = 80
 # ADDED (2026-10-30): after every 90 degree turn (left / right) the robot backs
@@ -103,7 +103,9 @@ TURN_SPEED = 80
 # more line to straighten the robot on. On the robot the turns before and
 # after a pick-up ended slightly past 90 degrees. 0 = switched off.
 # CHANGED (2026-10-30, later): 200 -> 100 (the user, after a robot test).
-AFTER_TURN_REVERSE_MS = 100
+# AFTER_TURN_REVERSE_MS = 100
+AFTER_TURN_REVERSE_MS = 000
+
 # ADDED (2026-10-30): the same, but for the turn into a box's line just before
 # a pick-up (ms). That line is short, so back up more there. 0 = switched off.
 PICKUP_TURN_REVERSE_MS = 300
@@ -155,7 +157,7 @@ SCAN_TURN_TIME = 200
 # the slot, a box and an empty slot read further apart.
 # CHANGED (2026-10-30, later): only 0.15 s of that (2300 -> 2150): at 2300 the
 # robot was too close and hit the wall. Top level: 1450.
-DISTANCE_TO_DROP_OFF_SCAN = 2150
+DISTANCE_TO_DROP_OFF_SCAN = 2100
 MINUS_DISTANCE_FOR_TOP_DROP_OFF = 700
 # CHANGED (2026-10-30): shorter by exactly as much as DISTANCE_TO_DROP_OFF_SCAN
 # grew (1450 -> 950 -> 650), because the robot already stands that much
@@ -185,4 +187,4 @@ DROP_RUNUP_MS = 800
 # half way between the two measured places: full about (306 + 252) / 2 = 279,
 # empty about (376 + 346) / 2 = 361 -> the middle, 320.
 # ESTIMATE: check it against the next test's "rear sensor readings".
-DISTANCE_TO_SCAN_DROP_OFF = 320
+DISTANCE_TO_SCAN_DROP_OFF = 325

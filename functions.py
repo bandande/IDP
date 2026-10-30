@@ -427,7 +427,7 @@ def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c
         pass
     elif robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and strict:
         print("return -10")
-        robot.forward(motor3,motor4,motor_speed3,motor_speed4)
+        robot.forward(motor3,motor4,100,100)
         return -10
     elif robot.front_left_sensor == 0 and robot.front_right_sensor == 1:
         # If left front sensor does not detect and right does
@@ -734,8 +734,8 @@ def robot_mode_check(variables, now):
                     and turn_item[1] in ("left", "right")):
                 corner_turn = (robot.previous_position, robot.position) in c.PIVOT_TURN_AT
                 next_slot_turn = (robot.has_box
-                                  and bool(re.match(r"^JUNCTION.*DROP", next_item))
-                                  and bool(re.match(r"^JUNCTION.*DROP", robot.position))
+                                  and bool(re.match(r"^JUNCTION.*BOTTOM.*DROP", next_item))
+                                  and bool(re.match(r"^JUNCTION.*BOTTOM.*DROP", robot.position))
                                   and "DROP" in robot.previous_position
                                   and not robot.previous_position.startswith("JUNCTION"))
                 if corner_turn or next_slot_turn:
@@ -821,9 +821,14 @@ def robot_mode_check(variables, now):
                             
             elif next_item == "straight":
                 robot.forward(motor3,motor4)
+                if strict:
+                    robot.forward(motor3,motor4,100,100)
             elif next_item == "reverse_straight":
                 print(robot.mode)
-                holdoff_until_reverse = now+500
+                if robot.specific_mode[2]=="pivot":
+                    holdoff_until_reverse = now+1500
+                else:
+                    holdoff_until_reverse = now+700
                 reversing=True
                 robot.forward(motor3,motor4, motor3.backward_speed-30, motor4.backward_speed-30, reverse=reversing)
                 robot.mode="straight"
@@ -882,6 +887,8 @@ def robot_mode_check(variables, now):
                     # If not moving straight
         elif motor3.return_state() == 0 or motor4.return_state()==0:
             robot.forward(motor3,motor4, reverse=reversing)
+            if strict:
+                robot.forward(motor3,motor4,100,100)
             print("motor not forward")
             
         if not reversing: # or not time_count<0
@@ -1001,14 +1008,6 @@ def robot_mode_check(variables, now):
                 robot.mode_extra_specific="move_turning"
                 # reversing=False
                 left_old_line=False
-    
-                            # CHANGED (2026-10-20): TURN_MIN_MS stays where it is (top
-                            # of this file) and is no longer changed here. Assigning
-                            # to it inside main() made Python treat TURN_MIN_MS as a
-                            # LOCAL variable of main() everywhere in main(), which
-                            # only worked by luck. turn_min is the minimum turn time
-                            # for THIS turn: START_TURN_MIN_MS for the first turn at
-                            # the start (exact turn especially for the start).
                 turn_min = c.TURN_MIN_MS
                             
                             
@@ -1114,8 +1113,9 @@ def robot_mode_check(variables, now):
                 motor3, 
                 motor4, 
                 servo1, 
-                servo2, 
+                servo2,
                 tasks,
+                leds,
                 config.PICKUP_UTURN_DIRECTION.get(robot.final_objective, "left")
             )
             
@@ -1139,14 +1139,7 @@ def robot_mode_check(variables, now):
                 robot.drop_off_info[1] = 1 if level == "N" else 0
                 # level = robot.pickup.level
                 # robot.drop_off_info[1] = 1 if level == "TOP" else 0
-                if level == "N":
-                    # Top means red is on and green is off
-                    leds.show(green=False)                        
-                    leds.show(red=True)
-                else:
-                    # Bottom means red is off and green is on
-                    leds.show(green=True)                        
-                    leds.show(red=False)
+                
                 
                 map[robot.final_objective]["type"]="COLLECTED"
                 robot.has_box=True
@@ -1258,7 +1251,7 @@ def robot_mode_check(variables, now):
                 # seen as empty. It also crashed if the rear sensor was missing.
                 for i in range(5):
                     d = tasks.rear_distance()
-                    if d:
+                    if d or robot.dropoff_info[1]==1:
                         break
                     else:
                         utime.sleep_ms(500)
@@ -1320,7 +1313,6 @@ def robot_mode_check(variables, now):
             if (now>=time_count and robot.drop_off_info[1]==0) or (robot.drop_off_info[1]==1 and (robot.front_left_sensor == 0 and robot.front_right_sensor == 0)):
                 robot.stop(motor3, motor4)
                 
-                utime.sleep_ms(100)
                 # Do the servo motions and moving, using sleep as well for moving forwards as 
                             # this needs to be hugely precise
                             # Drop off
