@@ -280,7 +280,26 @@ class Robot:
         self.motor_left = True
         self.motor_right = True
 
-    
+    def pivot(self, motor3, motor4, direction, speed):
+        """ADDED (2026-10-30, experimental): turn about ONE wheel, "left" or
+        "right". The wheel on the inside of the turn stands still and the
+        outside wheel drives forwards, so the robot rotates about the inside
+        wheel. Unlike spin(), the robot then needs to drive on much less
+        before the turn (see c.PIVOT_FORWARD_MS), so a box in the gripper
+        stays further from the table edge in front of it.
+        motor3 is the left wheel, motor4 the right wheel."""
+        if direction == "left":
+            motor3.off()
+            motor4.Forward(speed)
+            self.motor_left = False
+            self.motor_right = True
+        else:
+            motor3.Forward(speed)
+            motor4.off()
+            self.motor_left = True
+            self.motor_right = False
+
+
     from collections import deque
 
     def order_colours(self, targets = ["GREEN_1", "GREEN_2", "RED_1", "RED_2"]):
@@ -698,7 +717,31 @@ def robot_mode_check(variables, now):
             if {robot.position, next_item} == {"TOP_CENTRE", "JUNCTION_TOP_DROP_1"}:
                 print("I'm being strict!")
                 strict=True
-    
+
+            # ADDED (2026-10-30, experimental): turn about one wheel (a
+            # "pivot", see Robot.pivot) instead of driving on and spinning on
+            # the spot, where the drive before a normal turn pushes the box
+            # towards the table edge:
+            #   1. at the bottom corner, coming down from the first box's
+            #      junction (c.PIVOT_TURN_AT: JUNCTION_GREEN_1 ->
+            #      JUNCTION_LEFT_BOTTOM, JUNCTION_RED_1 -> JUNCTION_RIGHT_BOTTOM);
+            #   2. at a drop junction, coming out of a slot that already held a
+            #      box (the robot still has its box) on the way to the next slot.
+            # The turn item gets a 4th value, e.g. ["turning", "left", 90, "pivot"];
+            # the "turning" mode below then pivots instead of spinning.
+            turn_item = robot.queue[-1] if robot.queue else None
+            if (isinstance(turn_item, list) and turn_item[0] == "turning"
+                    and turn_item[1] in ("left", "right")):
+                corner_turn = (robot.previous_position, robot.position) in c.PIVOT_TURN_AT
+                next_slot_turn = (robot.has_box
+                                  and bool(re.match(r"^JUNCTION.*DROP", next_item))
+                                  and bool(re.match(r"^JUNCTION.*DROP", robot.position))
+                                  and "DROP" in robot.previous_position
+                                  and not robot.previous_position.startswith("JUNCTION"))
+                if corner_turn or next_slot_turn:
+                    robot.queue[-1] = turn_item + ["pivot"]
+                    print("pivot turn " + turn_item[1])
+
         
     
         else:
@@ -927,6 +970,13 @@ def robot_mode_check(variables, now):
                 forward_ms = 0
             else:
                 forward_ms = c.NODE_FORWARD_MS
+            # ADDED (2026-10-30, experimental): a pivot turn (4th value
+            # "pivot", see Robot.pivot) drives on only c.PIVOT_FORWARD_MS: it
+            # turns about the inside wheel, which must stop half the wheel
+            # track BEFORE the junction centre, not on it.
+            pivot = len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot"
+            if pivot and forward_ms > 0:
+                forward_ms = c.PIVOT_FORWARD_MS
             skip_forward = False
             drop_off_turn_count+=1
             if robot.mode_specific[0]=="straight":
@@ -970,11 +1020,22 @@ def robot_mode_check(variables, now):
                                 # Move back to straight movement
                                 # initial turn
                 elif robot.mode_specific[0]=="left":
-                    robot.spin(motor3, motor4, "left", c.TURN_SPEED)
-                    time_count=now+turn_min
+                    if len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot":
+                        # ADDED (2026-10-30, experimental): about one wheel;
+                        # it turns half as fast, so the minimum time is longer
+                        robot.pivot(motor3, motor4, "left", c.TURN_SPEED)
+                        time_count=now+c.PIVOT_TURN_MIN_MS
+                    else:
+                        robot.spin(motor3, motor4, "left", c.TURN_SPEED)
+                        time_count=now+turn_min
                 elif robot.mode_specific[0]=="right":
-                    robot.spin(motor3, motor4, "right", c.TURN_SPEED)
-                    time_count=now+turn_min
+                    if len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot":
+                        # ADDED (2026-10-30, experimental): see "left" above
+                        robot.pivot(motor3, motor4, "right", c.TURN_SPEED)
+                        time_count=now+c.PIVOT_TURN_MIN_MS
+                    else:
+                        robot.spin(motor3, motor4, "right", c.TURN_SPEED)
+                        time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
                     # CHANGED (2026-10-30): a turning item can say which way
                     # to turn round with a 3rd value, e.g.

@@ -107,6 +107,27 @@ AFTER_TURN_REVERSE_MS = 100
 # ADDED (2026-10-30): the same, but for the turn into a box's line just before
 # a pick-up (ms). That line is short, so back up more there. 0 = switched off.
 PICKUP_TURN_REVERSE_MS = 300
+# ADDED (2026-10-30, experimental): turns about ONE wheel ("pivot", see
+# Robot.pivot in functions.py) where the normal turn's drive on pushes the box
+# towards the table edge:
+#   * at a bottom corner, coming down from the first box's junction
+#     (PIVOT_TURN_AT: (previous junction, junction where the robot turns));
+#   * at a drop junction, coming out of a slot that already held a box, on
+#     the way to the next slot.
+# PIVOT_FORWARD_MS: drive on for this long before pivoting (instead of
+#     NODE_FORWARD_MS). The inside wheel must stop half the wheel track
+#     before the junction centre: the sensors are ~20 cm in front of the
+#     axle and the track is ~26 cm (sim/world.py), so drive 20 - 13 = 7 cm
+#     instead of 20 cm: 800 * 7 / 20 = 280, about 300 ms.
+#     CHANGED (2026-10-30): 300 -> 400 (the user). The real wheel track is
+#     not known; tune it with tests/test_turn_calibration.py "pivot_left" /
+#     "pivot_right": TOO FAR -> shorter, NOT FAR ENOUGH -> longer.
+# PIVOT_TURN_MIN_MS: a pivot turns half as fast as a spin (one wheel instead
+#     of two), so twice TURN_MIN_MS before it looks for the new line.
+PIVOT_TURN_AT = (("JUNCTION_GREEN_1", "JUNCTION_LEFT_BOTTOM"),
+                 ("JUNCTION_RED_1", "JUNCTION_RIGHT_BOTTOM"))
+PIVOT_FORWARD_MS = 400
+PIVOT_TURN_MIN_MS = 1600
 
 
 # NODE_FORWARD_MS = 800
