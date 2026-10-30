@@ -4,6 +4,14 @@ from machine import ADC, Pin
 
 
 def detect_magnetic_pole(adc_pin, baseline_data, run_time_sec=0.5):
+
+    def _read_median_sample(adc, samples_count=5):
+        """Stage 1: Median pre-filter to remove impulse EMI noise."""
+        buf = [adc.read_u16() for _ in range(samples_count)]
+        time.sleep_us(150)
+        buf.sort()
+        return float(buf[samples_count // 2])
+
     """
     Runs the Kalman filtering pipeline over run_time_sec to detect magnet pole and confidence.
     

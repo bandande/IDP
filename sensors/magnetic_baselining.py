@@ -2,15 +2,19 @@ import time
 import math
 from machine import ADC, Pin
 
-def _read_median_sample(adc, samples_count=5):
-    """Stage 1: Median pre-filter to remove impulse EMI noise."""
-    buf = [adc.read_u16() for _ in range(samples_count)]
-    time.sleep_us(150)
-    buf.sort()
-    return float(buf[samples_count // 2])
 
 
 def sample_magnetic_baseline(adc_pin, calibration_time_sec=1.0):
+
+   
+    def _read_median_sample(adc, samples_count=5):
+        """Stage 1: Median pre-filter to remove impulse EMI noise."""
+        buf = [adc.read_u16() for _ in range(samples_count)]
+        time.sleep_us(150)
+        buf.sort()
+        return float(buf[samples_count // 2])
+    
+    
     """
     Samples ambient background magnetic field and calculates baseline parameters.
     
