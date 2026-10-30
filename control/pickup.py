@@ -61,7 +61,7 @@ ticks_diff needed).
 import config
 import constants
 from actuators.gripper import grab_box, grab_finish_box
-from sensors.magnetic_confidence import detect_magnet_pole
+from sensors.magnetic_confidence_v2 import detect_magnet_pole
 
 
 # CHANGED (2026-10-27): the "no distance reading" limit of "to_box" is now
