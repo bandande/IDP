@@ -1,5 +1,27 @@
 
 
+# ADDED (2026-10-30): the zero point (no magnet), measured exactly like step 1
+# of detect_magnet_pole() below, but on its own. TaskSensors.calibrate() calls
+# it at start-up, while NO box is near the sensor, and the pick-up passes the
+# result to detect_magnet_pole(baseline=...). Without it, detect_magnet_pole()
+# measured the zero point itself during the pick-up, with the box already held
+# next to the sensor: the box's own field became "zero", only noise was left,
+# and the N / S result had nothing to do with the box (on the robot an N box
+# was reported as S with confidence 1.0).
+def measure_baseline(adc_pin, count=10):
+    """Average of `count` median-of-5 ADC readings, in read_u16 units (LSB)."""
+    from machine import ADC, Pin
+    from utime import sleep_us
+    adc = ADC(Pin(adc_pin))
+    total = 0.0
+    for _ in range(count):
+        buf = [adc.read_u16() for _ in range(5)]   # the same as read_median(5) below
+        sleep_us(150)
+        buf.sort()
+        total += buf[5 // 2]
+    return total / count
+
+
 def detect_magnet_pole(adc_pin, baseline=None, duration_sec=0.5):
     import time
     import math
@@ -84,6 +106,11 @@ def detect_magnet_pole(adc_pin, baseline=None, duration_sec=0.5):
         # SNR-based scaling normalized to 1.0 max
         snr = max_abs_delta / high_thresh
         confidence = min(1.0, max(0.0, snr / 2.0))
+
+    # ADDED (2026-10-30): print how strong the field was, for calibration.
+    # LSB = read_u16 units: 65535 LSB = 3.3 V, so 1 mV is about 20 LSB.
+    print("magnet: peak field %+.0f LSB (%+.1f mV) from baseline %.0f LSB"
+          % (peak_delta, peak_delta * 3300.0 / 65535.0, baseline))
 
     return pole, round(confidence, 2)
 

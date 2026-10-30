@@ -194,8 +194,13 @@ class Robot:
                 self.motor_right=False
                 motor3.Forward(motor3_speed)
                 motor4.Forward(motor4_speed)
-    def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
+    def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None, direction="right"):
             """motor3 is left. motor4 is right
+            CHANGED (2026-10-30): direction="right" (the default, as before)
+            turns round clockwise. direction="left" is the exact mirror image
+            (anticlockwise): the wheels swap roles and speeds. Used on the top
+            level, where the U-turn must go towards the open side because of
+            the railings.
             """
             if not motor3_speed:
                 motor3_speed=motor3.forward_speed
@@ -203,8 +208,13 @@ class Robot:
                 motor4_speed=motor4.backward_speed
             self.motor_left=True
             self.motor_right=True
-            motor3.Forward(motor3_speed)
-            motor4.Reverse(motor4_speed)
+            if direction == "left":
+                # mirror image of the lines below
+                motor3.Reverse(motor4_speed)
+                motor4.Forward(motor3_speed)
+            else:
+                motor3.Forward(motor3_speed)
+                motor4.Reverse(motor4_speed)
     def backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
             """motor3 is left. motor4 is right
             """
@@ -390,7 +400,7 @@ class Robot:
     def identify_junction(self):
         # This can be called to see which kinds of junction it can be
         pass
-    
+
 def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c.TURN_SPEED, reverse=None, time_count=0, strict=False):
     correction_motor_speed3=motor_speed3
     correction_motor_speed4=motor_speed4
@@ -966,11 +976,18 @@ def robot_mode_check(variables, now):
                     robot.spin(motor3, motor4, "right", c.TURN_SPEED)
                     time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
-                    robot.about(motor3,motor4, c.TURN_SPEED)
+                    # CHANGED (2026-10-30): a turning item can say which way
+                    # to turn round with a 3rd value, e.g.
+                    # ["turning", "about", 90, "left"]. Without it: "right",
+                    # as before.
+                    about_direction = "right"
+                    if len(robot.mode_specific) > 2:
+                        about_direction = robot.mode_specific[2]
+                    robot.about(motor3,motor4, c.TURN_SPEED, direction=about_direction)
                     time_count=now+turn_min*1.90
                 at_start=False
-    
-    
+
+
         elif robot.mode_extra_specific=="move_turning":
                         # If we need crash detection or anything here then do it
 
@@ -979,6 +996,28 @@ def robot_mode_check(variables, now):
             else:
                 if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
                     robot.stop(motor3,motor4)
+                    # ADDED (2026-10-30): after a 90 degree turn, back up a
+                    # little (c.AFTER_TURN_REVERSE_MS), so the line following
+                    # that comes next has more line to straighten the robot
+                    # on (the turns ended slightly past 90 degrees). A short
+                    # blocking move, like the reverse after a drop-off.
+                    # Not after a U-turn ("about"). CHANGED (2026-10-30,
+                    # later): also before "drop_off" (the user: without it the
+                    # box catches on the slot's frame); the drop-off drives
+                    # in that much longer, so the slot check stays where it
+                    # was calibrated (see drop_off_distance below).
+                    # CHANGED (2026-10-30, later): the turn into a box's line
+                    # ("pick_up" comes next) backs up longer,
+                    # c.PICKUP_TURN_REVERSE_MS: that line is short, so the
+                    # line following needs more room before the pick-up.
+                    reverse_ms = c.AFTER_TURN_REVERSE_MS
+                    if robot.queue and robot.queue[-1] == "pick_up":
+                        reverse_ms = c.PICKUP_TURN_REVERSE_MS
+                    if (robot.mode_specific[0] in ("left", "right")
+                            and reverse_ms > 0):
+                        robot.forward(motor3, motor4, reverse=True)
+                        utime.sleep_ms(reverse_ms)
+                        robot.stop(motor3, motor4)
                     robot.mode="" # Moves to next step
                     robot.direction=turn_to_direction(robot.direction, robot.mode_specific[0])
                     print(robot.direction)
@@ -1109,7 +1148,11 @@ def robot_mode_check(variables, now):
                 drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN
             else:
                 drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_FOR_TOP_DROP_OFF
-                            
+            # ADDED (2026-10-30): the turn into this branch ended with a short
+            # reverse (c.AFTER_TURN_REVERSE_MS), so drive in that much longer:
+            # the slot check stays at the calibrated place.
+            drop_off_distance+=c.AFTER_TURN_REVERSE_MS
+
             time_count=now+drop_off_distance
         elif robot.mode_extra_specific=="move_straight_and_detect":
             
@@ -1128,7 +1171,19 @@ def robot_mode_check(variables, now):
                         # If this is coming from drop_off point
             if drop_off_turn_count==0:
                 skip_forward=True
-                robot.queue+=["drop_off", ["turning", "about", 90]]
+                # CHANGED (2026-10-30): on the top level there are railings,
+                # so the U-turn goes towards the open side:
+                #   left side  (drop_off_info[0]==0): turn round to the right
+                #   right side (drop_off_info[0]==1): turn round to the left
+                # CHANGED (2026-10-30, later): the same on the bottom level.
+                # Always turning right there made the right side NOT a mirror
+                # image of the left: the rear sensor read 310 - 324 mm on
+                # EMPTY right slots (left: empty 376, full 306), so empty
+                # slots were seen as full.
+                if robot.drop_off_info[0]==1:
+                    robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
+                else:
+                    robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
                 utime.sleep_ms(500)
@@ -1160,7 +1215,16 @@ def robot_mode_check(variables, now):
                     print("NO BOX SEEN")
                     utime.sleep_ms(500)
                     skip_forward=True
-                    robot.queue+=["drop_off", ["turning", "about", 90]]
+                    # CHANGED (2026-10-30): on the top level turn back the
+                    # other way, through the same open side as the first
+                    # U-turn (railings):
+                    #   left side  (drop_off_info[0]==0): turn round to the left
+                    #   right side (drop_off_info[0]==1): turn round to the right
+                    # The bottom level turns round to the right, as before.
+                    if robot.drop_off_info[1]==1 and robot.drop_off_info[0]==0:
+                        robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
+                    else:
+                        robot.queue+=["drop_off", ["turning", "about", 90]]
                     robot.mode=""
                 else:
                     print("BOX THERE ALREADY")
@@ -1174,9 +1238,23 @@ def robot_mode_check(variables, now):
                     dropping_off=False
             elif drop_off_turn_count==2:
                 gripper_lift(servo1, servo2)
+                # ADDED (2026-10-30): back up first (c.DROP_RUNUP_MS), then
+                # drive in that much longer. The line following of this last
+                # drive stops 800 ms before its end (move_and_drop_off
+                # below). Since the slot check moved closer to the slot, this
+                # drive (DISTANCE_TO_DROP_POINT) was shorter than 800 ms, so it
+                # had NO line following at all: any angle left by the U-turn
+                # went straight on, and the box caught on the slot's frame.
+                # The run-up gives the line following room to straighten the
+                # robot first, as before the slot check moved.
+                if c.DROP_RUNUP_MS > 0:
+                    robot.forward(motor3, motor4, reverse=True)
+                    utime.sleep_ms(c.DROP_RUNUP_MS)
+                    robot.stop(motor3, motor4)
+                    now = utime.ticks_diff(utime.ticks_ms(), robot.start)
                 robot.mode_extra_specific="move_and_drop_off"
                 robot.forward(motor3,motor4)
-                time_count=now+c.DISTANCE_TO_DROP_POINT
+                time_count=now+c.DISTANCE_TO_DROP_POINT+c.DROP_RUNUP_MS
         elif robot.mode_extra_specific=="move_and_drop_off":
             if (now>=time_count and robot.drop_off_info[1]==0) or (robot.drop_off_info[1]==1 and (robot.front_left_sensor == 0 and robot.front_right_sensor == 0)):
                 robot.stop(motor3, motor4)

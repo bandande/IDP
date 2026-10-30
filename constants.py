@@ -98,6 +98,15 @@ DRIVE_SPEED = 90
 NODE_FORWARD_MS = 800
 TURN_MIN_MS = 800
 TURN_SPEED = 80
+# ADDED (2026-10-30): after every 90 degree turn (left / right) the robot backs
+# up for this long (ms), so the line following that comes next has a little
+# more line to straighten the robot on. On the robot the turns before and
+# after a pick-up ended slightly past 90 degrees. 0 = switched off.
+# CHANGED (2026-10-30, later): 200 -> 100 (the user, after a robot test).
+AFTER_TURN_REVERSE_MS = 100
+# ADDED (2026-10-30): the same, but for the turn into a box's line just before
+# a pick-up (ms). That line is short, so back up more there. 0 = switched off.
+PICKUP_TURN_REVERSE_MS = 300
 
 
 # NODE_FORWARD_MS = 800
@@ -116,8 +125,43 @@ SCAN_TURN_TIME = 200
 
 
 
-DISTANCE_TO_DROP_OFF_SCAN = 1500
+# CHANGED (2026-10-30): drive 0.5 s further into the drop branch before the
+# U-turn and the rear sensor check (was 1500), so the rear sensor is closer
+# to a box already in the slot. On the robot (2026-10-30 test) 3 of the 4
+# full slots were seen as empty from the old position. The top level drives
+# MINUS_DISTANCE_FOR_TOP_DROP_OFF less.
+# CHANGED (2026-10-30, later): another 0.3 s closer (2000 -> 2300): closer to
+# the slot, a box and an empty slot read further apart.
+# CHANGED (2026-10-30, later): only 0.15 s of that (2300 -> 2150): at 2300 the
+# robot was too close and hit the wall. Top level: 1450.
+DISTANCE_TO_DROP_OFF_SCAN = 2150
 MINUS_DISTANCE_FOR_TOP_DROP_OFF = 700
-DISTANCE_TO_DROP_POINT = 1450
+# CHANGED (2026-10-30): shorter by exactly as much as DISTANCE_TO_DROP_OFF_SCAN
+# grew (1450 -> 950 -> 650), because the robot already stands that much
+# further in, so the bottom-level box is put down at the same place as
+# before. (The top level drives on until the line ends, it does not use this.)
+# CHANGED (2026-10-30, later): 650 -> 560. This drive is now timed from AFTER
+# the run-up (DROP_RUNUP_MS); before, the gripper lift (about 90 ms) at its
+# start was counted in it. 90 ms less = the same end point as before.
+# CHANGED (2026-10-30, later): 560 -> 710, 150 ms longer because
+# DISTANCE_TO_DROP_OFF_SCAN became 150 ms shorter: the box is put down where
+# the slot check + this drive end, so the end point stays the same.
+DISTANCE_TO_DROP_POINT = 710
+# ADDED (2026-10-30): before that last drive into the slot the robot backs up
+# for this long (ms) and then drives in DISTANCE_TO_DROP_POINT + this, so it
+# still ends DISTANCE_TO_DROP_POINT past the slot check. The drive's line
+# following stops 800 ms before its end, so it straightens the robot for
+# DISTANCE_TO_DROP_POINT + DROP_RUNUP_MS - 800 ms (now 710 ms).
+# 0 = switched off.
+DROP_RUNUP_MS = 800
 
-DISTANCE_TO_SCAN_DROP_OFF = 370
+# CHANGED (2026-10-30): slot full / empty threshold of the rear sensor (mm),
+# was 370. Rear sensor readings at DISTANCE_TO_DROP_OFF_SCAN = 2000 (left
+# bottom): full 306, empty 376 - 378. Each 0.1 s closer reads about 16 mm
+# less, so at 2300 about full 260, empty 330 -> the middle, 295.
+# Measured at 2300 (robot test): full 243 - 252, empty 346.
+# CHANGED (2026-10-30, later): 295 -> 320 for DISTANCE_TO_DROP_OFF_SCAN = 2150,
+# half way between the two measured places: full about (306 + 252) / 2 = 279,
+# empty about (376 + 346) / 2 = 361 -> the middle, 320.
+# ESTIMATE: check it against the next test's "rear sensor readings".
+DISTANCE_TO_SCAN_DROP_OFF = 320

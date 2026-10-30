@@ -41,6 +41,7 @@ simulated ones.
 from utime import ticks_ms, ticks_diff, sleep_ms
 
 import config
+from sensors.magnetic_confidence import measure_baseline   # ADDED (2026-10-30)
 
 # ADDED (2026-10-29): box_distance_now() prints its DEBUG line at most this
 # often (ms), instead of on every call.
@@ -109,6 +110,8 @@ class TaskSensors:
         # the other: tasks.grab_tof.poll(), tasks.grab_tof.get_distance().
         self.grab_tof = grab_tof
         self.last_field_mv = None     # strongest field seen by the last read_pole()
+        # ADDED (2026-10-30): zero point for detect_magnet_pole(), set by calibrate()
+        self.magnet_baseline_lsb = None
         self.last_slot_mm = None      # median distance of the last slot_occupied()
         self.last_box_mm = None       # median distance of the last box_distance()
         # ADDED (2026-10-29): every reading kept by the last rear_distance() (for printing)
@@ -140,7 +143,13 @@ class TaskSensors:
     # -- magnet ---------------------------------------------------------------
     def calibrate(self):
         """Measure the magnet sensor's zero-field baseline. Call at start-up with
-        NO magnet near the robot (e.g. in the start box). Returns mV or None."""
+        NO magnet near the robot (e.g. in the start box). Returns mV or None.
+        CHANGED (2026-10-30): also measures the zero point for the pick-up's
+        magnet check (sensors/magnetic_confidence.detect_magnet_pole), in
+        that function's own units, and keeps it in self.magnet_baseline_lsb.
+        100 readings instead of the function's own 10, for a steadier zero."""
+        self.magnet_baseline_lsb = measure_baseline(config.MAG_PIN, count=100)
+        print("magnet zero point for detect_magnet_pole: %.0f LSB" % self.magnet_baseline_lsb)
         if self.magnet is None or self.magnet.mode != "analog":
             return None
         return self.magnet.calibrate_baseline()

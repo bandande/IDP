@@ -329,7 +329,16 @@ class PickUp:
             confidence=0
             level=""
             for i in range(10):
-                level, confidence = detect_magnet_pole(adc_pin=26, duration_sec=0.5)
+                # CHANGED (2026-10-30): pass the zero point measured at
+                # start-up, with no box near the sensor (TaskSensors.calibrate).
+                # Without it the function measured the zero point here, with
+                # the box already held next to the sensor, so the box's own
+                # field counted as zero and the N / S result was noise.
+                level, confidence = detect_magnet_pole(
+                    adc_pin=26,
+                    baseline=getattr(self.tasks, "magnet_baseline_lsb", None),
+                    duration_sec=0.5,
+                )
                 if confidence>0.8:
                     break
                 else:
