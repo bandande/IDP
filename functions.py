@@ -299,9 +299,9 @@ class Robot:
             distance = distances.get(target, float("inf"))
 
             if on_left_top and target.startswith("GREEN"):
-                distance -= 0.25
+                distance -= 2.25
             elif not on_left_top and target.startswith("RED"):
-                distance -= 0.25
+                distance -= 2.25
 
             return distance
 
