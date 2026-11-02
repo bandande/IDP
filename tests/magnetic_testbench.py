@@ -145,18 +145,18 @@ MAGNET_PIN = 26
 
 # Run baseline sampling for 2.0 seconds at startup
 print("Calibrating ambient magnetic field...")
-magnetic_calibration_weights = sample_magnetic_baseline(MAGNET_PIN, calibration_time_sec=2.0)
+magnetic_calibration_weights = sample_magnetic_baseline(MAGNET_PIN, calibration_time_sec=4.0)
 print("Baseline Calibrated:", magnetic_calibration_weights)
-x = input("Enter when ready to test")
+time.sleep(5)
 
 # Run a 0.5-second scan window using stored weights
 pole, confidence = detect_magnetic_pole(
     MAGNET_PIN, 
     magnetic_calibration_weights, 
-    run_time_sec=0.5
+    run_time_sec=1.0
 )
 
-if confidence >= 0.8:
+if confidence >= 0.75:
     print(f"High-confidence detection: {pole} pole ({confidence * 100}%)")
     if pole == "N":
         # Trigger North Pole behavior
