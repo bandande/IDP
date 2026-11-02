@@ -15,6 +15,8 @@ import re
 from sensors.line_processing import OUTER_LEFT, INNER_LEFT, INNER_RIGHT, OUTER_RIGHT
 from control.start_stop import StartStopButton
 from actuators.leds import StatusLeds
+from sensors.magnetic_baselining import sample_magnetic_baseline
+
 
 # ADDED (2026-10-20): the three task sensors (control/task_sensors.py):
 #   - magnet sensor: north / south pole of the box at pick-up -> rack level
@@ -51,6 +53,9 @@ def main():
     # f.grab_box(variables[19], variables[20])
     # f.grab_finish_box(variables[19], variables[20])
     
+    variables[16].baseline_data=sample_magnetic_baseline(26, 4)
+    print(variables[16].baseline_data)
+    
     variables[16].queue=[
         # "go_back",
         "deliver",
@@ -68,8 +73,7 @@ def main():
     variables[16].direction = "north"
     
     
-    #start running
-    utime.sleep(1)
+
 
     while True:
 

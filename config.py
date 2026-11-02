@@ -251,7 +251,7 @@ SERVO_PINS = {"servo1": 15, "servo2": 13}   # GP15 = physical 20, GP13 = physica
 # gripper. Angles above 270 need pulses longer than the servo's maximum of
 # 2.5 ms (at 300 a servo ran away), so 270 is also a hard limit in
 # actuators/servo.py, whatever is written here.
-SERVO_SAFE_RANGE = {"servo1": (155, 164, 173), "servo2": (131, 131, 170)}
+SERVO_SAFE_RANGE = {"servo1": (155, 164, 173), "servo2": (130, 130, 170)}
 # ADDED (2026-10-23): the angle at which the gripper holds a box (measured
 # with the sensor viewer's Grab / Servo tab). servo2 never goes below it.
 # CHANGED (2026-10-26): emptied - the old grab angle (servo2 220) belonged to

@@ -61,7 +61,8 @@ ticks_diff needed).
 import config
 import constants
 from actuators.gripper import grab_box, grab_finish_box
-from sensors.magnetic_confidence_v2 import detect_magnet_pole
+from sensors.magnetic_confidence_v2 import detect_magnetic_pole
+
 
 
 # CHANGED (2026-10-27): the "no distance reading" limit of "to_box" is now
@@ -114,6 +115,8 @@ class PickUp:
         # REPORTED; the robot does not yet turn left / right because of it.
         self.pole = None
         self.level = None
+        
+        self.no_box=False
 
         # Internal state (the leading underscore means "only used in here").
         self._phase_start_ms = 0      # now_ms when the present phase began (for its time limit)
@@ -138,6 +141,7 @@ class PickUp:
         self.pole = None
         self.level = None
         self.confidence = 0
+        self.no_box=False
 
         # Internal state (the leading underscore means "only used in here").
         self._phase_start_ms = 0      # now_ms when the present phase began (for its time limit)
@@ -288,8 +292,11 @@ class PickUp:
             if self._last_reading_ms>=config.GRAB_APPROACH_MAX_MS-100:
                 print("CONTINUING")
                 self._last_reading_ms = now_ms
-                self._drive_straight_to_box()
-                self._change_phase("manual_move", now_ms, "manual move for box")
+                # self._drive_straight_to_box()
+                # self._change_phase("manual_move", now_ms, "manual move for box")
+                self._change_phase("reverse", now_ms, "no box detected")
+                self.no_box=True
+
             else:
                 print("some readings received but still failed")
             return
@@ -329,28 +336,31 @@ class PickUp:
             # Magnetic sensor
             confidence=0
             level=""
-            for i in range(10):
+            for i in range(5):
                 # CHANGED (2026-10-30): pass the zero point measured at
                 # start-up, with no box near the sensor (TaskSensors.calibrate).
                 # Without it the function measured the zero point here, with
                 # the box already held next to the sensor, so the box's own
                 # field counted as zero and the N / S result was noise.
-                level, confidence = detect_magnet_pole(
+                level, confidence = detect_magnetic_pole(
                     adc_pin=26,
-                    baseline=getattr(self.tasks, "magnet_baseline_lsb", None),
-                    duration_sec=0.5,
+                    baseline_data=self.robot.baseline_data,
+                    run_time_sec=1+(i*0.2),
                 )
-                if confidence>0.8:
+                if confidence>0.75:
                     break
                 else:
                     print("Confidence too low, try again")
+            else:
+                self.leds.show(green=True)                        
+                self.leds.show(red=True)
             print("level:"+str(level) +"\t confidence:"+ str(confidence))
             
             self.level=level
             self.confidence=confidence
             
             if level == "N":
-                # Top means red is on and green is off
+                # Top means red is on and green is off                
                 self.leds.show(green=False)                        
                 self.leds.show(red=True)
             else:

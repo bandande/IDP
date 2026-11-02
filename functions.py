@@ -124,6 +124,8 @@ class Robot:
         self.drop_off_info=[0,1,0]
         
         self.start=0
+        
+        self.baseline_data={}
     
     def __init__(self):
         self.reset()
@@ -328,9 +330,9 @@ class Robot:
             distance = distances.get(target, float("inf"))
 
             if on_left_top and target.startswith("GREEN"):
-                distance -= 0.25
+                distance -= 2.25
             elif not on_left_top and target.startswith("RED"):
-                distance -= 0.25
+                distance -= 2.25
 
             return distance
 
@@ -488,8 +490,7 @@ def wait_for_start(button):
     while not button.pressed():
         utime.sleep_ms(5)
         # print("hello")
-    print("starting in %d ms" % config.START_DELAY_MS)
-    utime.sleep_ms(config.START_DELAY_MS)
+    print("starting in 4000 ms")
 
 
 def button_check(variables):
@@ -738,7 +739,7 @@ def robot_mode_check(variables, now):
                                   and bool(re.match(r"^JUNCTION.*BOTTOM.*DROP", robot.position))
                                   and "DROP" in robot.previous_position
                                   and not robot.previous_position.startswith("JUNCTION"))
-                if corner_turn or next_slot_turn:
+                if corner_turn or next_slot_turn and robot.has_box:
                     robot.queue[-1] = turn_item + ["pivot"]
                     print("pivot turn " + turn_item[1])
 
@@ -792,6 +793,8 @@ def robot_mode_check(variables, now):
                 drop_off_string+="DROP_"
             
                 for drop_number in range(1,7):
+                    if robot.drop_off_info[1]==1 and drop_number == 1:
+                        continue
                     if map[drop_off_string+str(drop_number)]["type"]=="DEAD_END":
                         robot.final_objective=drop_off_string+str(drop_number)                            
                         break
@@ -820,13 +823,19 @@ def robot_mode_check(variables, now):
                 robot.mode=""
                             
             elif next_item == "straight":
-                robot.forward(motor3,motor4)
+                
                 if strict:
                     robot.forward(motor3,motor4,100,100)
+                else:
+                    robot.forward(motor3,motor4)
             elif next_item == "reverse_straight":
                 print(robot.mode)
-                if robot.specific_mode[2]=="pivot":
-                    holdoff_until_reverse = now+1500
+                if len(robot.mode_specific) > 2:
+                    pivot = len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot"
+                else:
+                    pivot=False
+                if pivot:
+                    holdoff_until_reverse = now+2000
                 else:
                     holdoff_until_reverse = now+700
                 reversing=True
@@ -1051,9 +1060,7 @@ def robot_mode_check(variables, now):
         elif robot.mode_extra_specific=="move_turning":
                         # If we need crash detection or anything here then do it
 
-            if now<time_count:
-                pass
-            else:
+            if now>time_count:
                 if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
                     robot.stop(motor3,motor4)
                     # ADDED (2026-10-30): after a 90 degree turn, back up a
@@ -1107,7 +1114,6 @@ def robot_mode_check(variables, now):
             # the U-turn spins away from the neighbouring box (config)
             print("now")
             gripper_carry(variables[19], variables[20])
-            utime.sleep_ms(1000)
             robot.pickup = PickUp(
                 robot, 
                 motor3, 
@@ -1133,16 +1139,21 @@ def robot_mode_check(variables, now):
                 # the pick-up sequence right after the grab (robot.pickup.pole)
                 # - no second reading here.
                 
-                level=robot.pickup.level
-                confidence=robot.pickup.confidence
                 
-                robot.drop_off_info[1] = 1 if level == "N" else 0
-                # level = robot.pickup.level
-                # robot.drop_off_info[1] = 1 if level == "TOP" else 0
                 
                 
                 map[robot.final_objective]["type"]="COLLECTED"
-                robot.has_box=True
+                if robot.pickup.no_box:
+                    robot.queue.append("collect")
+                    print("GOING FOR ANOTHER (space was empty)")
+                else:
+                    robot.has_box=True
+                    level=robot.pickup.level
+                    confidence=robot.pickup.confidence
+                    
+                    robot.drop_off_info[1] = 1 if level == "N" else 0
+                    # level = robot.pickup.level
+                    # robot.drop_off_info[1] = 1 if level == "TOP" else 0
                 robot.previous_position=robot.position
                 robot.position="JUNCTION_" + robot.final_objective
                 robot.mode=""
@@ -1190,16 +1201,19 @@ def robot_mode_check(variables, now):
             robot.position=robot.objective
             
             print(robot.position)
-            utime.sleep_ms(500)
             print("DROPPING STUFF")
                         # Turning hasn't started, do the turns
             dropping_off=True
             robot.mode_extra_specific="move_straight_and_detect"
                         
+                        
             robot.forward(motor3,motor4)
                         # If at top, then move very slightly less
             if robot.drop_off_info[1]==0:
-                drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN
+                if robot.drop_off_info[0]==0:
+                    drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN
+                else:
+                    drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_TO_DROP_OFF_SCAN_RIGHT
             else:
                 drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_FOR_TOP_DROP_OFF
             # ADDED (2026-10-30): the turn into this branch ended with a short
@@ -1237,10 +1251,11 @@ def robot_mode_check(variables, now):
                 if robot.drop_off_info[0]==1:
                     robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
                 else:
-                    robot.queue+=["drop_off", ["turning", "about", 90]]
+                    robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
+                    # robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
-                utime.sleep_ms(500)
+                utime.sleep_ms(100)
                 # CHANGED (2026-10-29): read the rear sensor for
                 # config.SLOT_READ_MS while standing still and take the median
                 # (TaskSensors.rear_distance). The old loop asked 10 times
@@ -1251,10 +1266,10 @@ def robot_mode_check(variables, now):
                 # seen as empty. It also crashed if the rear sensor was missing.
                 for i in range(5):
                     d = tasks.rear_distance()
-                    if d or robot.dropoff_info[1]==1:
+                    if d or robot.drop_off_info[1]==1:
                         break
                     else:
-                        utime.sleep_ms(500)
+                        utime.sleep_ms(300)
                         print("trying again, reading was: %s" %tasks.last_rear_readings)
                 print("rear sensor readings: %s" % tasks.last_rear_readings)
                 # No reading = nothing in range behind the robot = empty slot
@@ -1267,7 +1282,6 @@ def robot_mode_check(variables, now):
                 if mean_scan>c.DISTANCE_TO_SCAN_DROP_OFF:
                     # Use sensor to detect if box is there or not
                     print("NO BOX SEEN")
-                    utime.sleep_ms(500)
                     skip_forward=True
                     # CHANGED (2026-10-30): on the top level turn back the
                     # other way, through the same open side as the first
@@ -1275,10 +1289,12 @@ def robot_mode_check(variables, now):
                     #   left side  (drop_off_info[0]==0): turn round to the left
                     #   right side (drop_off_info[0]==1): turn round to the right
                     # The bottom level turns round to the right, as before.
-                    if robot.drop_off_info[1]==1 and robot.drop_off_info[0]==0:
+                    if robot.drop_off_info[0]==1:
                         robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
                     else:
-                        robot.queue+=["drop_off", ["turning", "about", 90]]
+                        robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
+
+                        # robot.queue+=["drop_off", ["turning", "about", 90]]
                     robot.mode=""
                 else:
                     print("BOX THERE ALREADY")
@@ -1286,7 +1302,9 @@ def robot_mode_check(variables, now):
                     map[robot.final_objective]["type"]="FILLED"
                     robot.queue+=["deliver"]
                     if robot.drop_off_info[1]==1:
-                        reversing=True
+                        
+                        robot.forward(motor3,motor4, 60, 60, reverse=True)
+                        utime.sleep_ms(400)
                         print("reverse a bit since at top")
                     robot.mode=""
                     dropping_off=False
@@ -1305,12 +1323,12 @@ def robot_mode_check(variables, now):
                     robot.forward(motor3, motor4, reverse=True)
                     utime.sleep_ms(c.DROP_RUNUP_MS)
                     robot.stop(motor3, motor4)
-                    now = utime.ticks_diff(utime.ticks_ms(), robot.start)
+                now = utime.ticks_diff(utime.ticks_ms(), robot.start)
                 robot.mode_extra_specific="move_and_drop_off"
                 robot.forward(motor3,motor4)
                 time_count=now+c.DISTANCE_TO_DROP_POINT+c.DROP_RUNUP_MS
         elif robot.mode_extra_specific=="move_and_drop_off":
-            if (now>=time_count and robot.drop_off_info[1]==0) or (robot.drop_off_info[1]==1 and (robot.front_left_sensor == 0 and robot.front_right_sensor == 0)):
+            if (now>=time_count and robot.drop_off_info[1] == 0) or (robot.drop_off_info[1] == 1 and (robot.front_left_sensor == 0 and robot.front_right_sensor == 0)):
                 robot.stop(motor3, motor4)
                 
                 # Do the servo motions and moving, using sleep as well for moving forwards as 
@@ -1365,9 +1383,9 @@ def robot_mode_check(variables, now):
                 
                 
             else:
-                if motor3.return_state() == 0 or motor4.return_state()==0:
+                if motor3.return_state() == 0 or motor4.return_state() == 0:
                     robot.forward(motor3,motor4, reverse=reversing)
-                if now<time_count-800:
+                if now<time_count-500:
                     time_count = corrections(robot, motor3, motor4, time_count=time_count)
             
             
