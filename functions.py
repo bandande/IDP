@@ -793,7 +793,7 @@ def robot_mode_check(variables, now):
                 drop_off_string+="DROP_"
             
                 for drop_number in range(1,7):
-                    if robot.drop_off_info[1]==1 and drop_number == 1:
+                    if robot.drop_off_info[1]==1 and drop_number <= 1:
                         continue
                     if map[drop_off_string+str(drop_number)]["type"]=="DEAD_END":
                         robot.final_objective=drop_off_string+str(drop_number)                            
@@ -835,11 +835,11 @@ def robot_mode_check(variables, now):
                 else:
                     pivot=False
                 if pivot:
-                    holdoff_until_reverse = now+2000
+                    holdoff_until_reverse = now+1000
                 else:
-                    holdoff_until_reverse = now+700
+                    holdoff_until_reverse = now+400
                 reversing=True
-                robot.forward(motor3,motor4, motor3.backward_speed-30, motor4.backward_speed-30, reverse=reversing)
+                robot.forward(motor3,motor4, motor3.backward_speed-10, motor4.backward_speed-10, reverse=reversing)
                 robot.mode="straight"
             elif next_item == "wait_light":
                             # ADDED (2026-10-20): stop in front of the traffic light
@@ -929,7 +929,7 @@ def robot_mode_check(variables, now):
                         
                         # In case it wants to reverse
             if reversing:
-                utime.sleep_ms(100)
+                utime.sleep_ms(200)
                 reversing=False 
             if robot.queue[-1]=="straight":
                 robot.queue.pop()
@@ -1338,6 +1338,7 @@ def robot_mode_check(variables, now):
                     robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
                     utime.sleep_ms(100)
                 robot.stop(motor3,motor4)
+                utime.sleep_ms(400)
                 
                 release_box(servo2)
                 
@@ -1351,12 +1352,12 @@ def robot_mode_check(variables, now):
                 
                 
                 robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
-                utime.sleep_ms(1400)
+                utime.sleep_ms(1000)
                 
                 
                 
                 robot.forward(motor3,motor4, 70, 70, reverse=True)
-                utime.sleep_ms(500)
+                utime.sleep_ms(400)
             
             
                 gripper_safe(servo1, servo2)
