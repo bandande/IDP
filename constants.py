@@ -159,7 +159,7 @@ SCAN_TURN_TIME = 200
 # robot was too close and hit the wall. Top level: 1450.
 DISTANCE_TO_DROP_OFF_SCAN = 1500
 MINUS_DISTANCE_FOR_TOP_DROP_OFF = 620
-MINUS_DISTANCE_TO_DROP_OFF_SCAN_RIGHT = 300
+MINUS_DISTANCE_TO_DROP_OFF_SCAN_RIGHT = 320
 # CHANGED (2026-10-30): shorter by exactly as much as DISTANCE_TO_DROP_OFF_SCAN
 # grew (1450 -> 950 -> 650), because the robot already stands that much
 # further in, so the bottom-level box is put down at the same place as
@@ -170,7 +170,7 @@ MINUS_DISTANCE_TO_DROP_OFF_SCAN_RIGHT = 300
 # CHANGED (2026-10-30, later): 560 -> 710, 150 ms longer because
 # DISTANCE_TO_DROP_OFF_SCAN became 150 ms shorter: the box is put down where
 # the slot check + this drive end, so the end point stays the same.
-DISTANCE_TO_DROP_POINT = 500
+DISTANCE_TO_DROP_POINT = 660
 # ADDED (2026-10-30): before that last drive into the slot the robot backs up
 # for this long (ms) and then drives in DISTANCE_TO_DROP_POINT + this, so it
 # still ends DISTANCE_TO_DROP_POINT past the slot check. The drive's line
@@ -188,4 +188,7 @@ DROP_RUNUP_MS = 800
 # half way between the two measured places: full about (306 + 252) / 2 = 279,
 # empty about (376 + 346) / 2 = 361 -> the middle, 320.
 # ESTIMATE: check it against the next test's "rear sensor readings".
-DISTANCE_TO_SCAN_DROP_OFF = 325
+# DISTANCE_TO_SCAN_DROP_OFF = 325
+DISTANCE_TO_SCAN_DROP_OFF = 340
+
+CORRECTION_HOLDOFF_MS = 100

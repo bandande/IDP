@@ -435,7 +435,7 @@ def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c
         # If left front sensor does not detect and right does
         robot.queue.append(robot.mode)
         robot.mode="correction"
-        robot.right(motor3,motor4,correction_motor_speed3, correction_motor_speed4-30)
+        robot.right(motor3,motor4,correction_motor_speed3, correction_motor_speed4-40)
         now = utime.ticks_diff(utime.ticks_ms(), robot.start)
         time_count=time_count-now
         #Then turn right
@@ -444,7 +444,7 @@ def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c
         # If left front sensor does not detect and right does
         robot.queue.append(robot.mode)
         robot.mode="correction"
-        robot.left(motor3,motor4,correction_motor_speed3-30, correction_motor_speed4)
+        robot.left(motor3,motor4,correction_motor_speed3-40, correction_motor_speed4)
         now = utime.ticks_diff(utime.ticks_ms(), robot.start)
         time_count=time_count-now
 
@@ -502,7 +502,7 @@ def button_check(variables):
     reversing, robot, scantime, sensors, servo1,\
     servo2, skip_forward, tasks, time_count, traffic,\
     turning, using_time , mean_scan, holdoff_until_reverse, leds,\
-    yellow_flash_timer, strict = variables
+    yellow_flash_timer, strict, correction_timeout = variables
     #retrieve variables            
 
     
@@ -613,6 +613,7 @@ def button_check(variables):
                  leds,                  #29
                  yellow_flash_timer,    #30
                  strict,                #31
+                 correction_timeout,    #32
                  )
     #condense and return new values of variables
 
@@ -629,7 +630,7 @@ def robot_mode_check(variables, now):
     reversing, robot, scantime, sensors, servo1,\
     servo2, skip_forward, tasks, time_count, traffic,\
     turning, using_time , mean_scan, holdoff_until_reverse, leds,\
-    yellow_flash_timer, strict = variables
+    yellow_flash_timer, strict, correction_timeout = variables
     #retrieve variables            
 
     count+=1 #moved from main so still updated one per loop but is now updated when variables is editable
@@ -901,10 +902,11 @@ def robot_mode_check(variables, now):
             print("motor not forward")
             
         if not reversing: # or not time_count<0
-            if strict:
-                time_count = corrections(robot,motor3,motor4,100,100, reverse=reversing)
-            else:
-                time_count = corrections(robot,motor3,motor4, reverse=reversing)
+            if now>=correction_timeout:
+                if strict:
+                    time_count = corrections(robot,motor3,motor4,100,100, reverse=reversing)
+                else:
+                    time_count = corrections(robot,motor3,motor4, reverse=reversing)
             
                 
                     
@@ -936,6 +938,7 @@ def robot_mode_check(variables, now):
             robot.mode="" # Moves onto next instruction (which is turning)
             holdoff_until = now + c.JUNCTION_HOLDOFF_MS
             holdoff_until_reverse = now
+            correction_timeout = now + c.CORRECTION_HOLDOFF_MS
         
         
         elif robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
@@ -946,7 +949,7 @@ def robot_mode_check(variables, now):
             
         # Going up the ramp, if both sensors don't exist, just keep going forwards
         elif robot.front_left_sensor == 0 and robot.front_right_sensor == 0 and strict:
-            robot.forward(motor3,motor4, motor3.forward_speed, motor4.forward_speed)
+            robot.forward(motor3, motor4, motor3.forward_speed, motor4.forward_speed)
             robot.mode="" # Moves back to straight or turning
             now = utime.ticks_diff(utime.ticks_ms(), robot.start)
             time_count=now+time_count
@@ -1323,8 +1326,10 @@ def robot_mode_check(variables, now):
                     robot.forward(motor3, motor4, reverse=True)
                     utime.sleep_ms(c.DROP_RUNUP_MS)
                     robot.stop(motor3, motor4)
+                    utime.sleep_ms(500)
                 now = utime.ticks_diff(utime.ticks_ms(), robot.start)
                 robot.mode_extra_specific="move_and_drop_off"
+                
                 robot.forward(motor3,motor4)
                 time_count=now+c.DISTANCE_TO_DROP_POINT+c.DROP_RUNUP_MS
         elif robot.mode_extra_specific=="move_and_drop_off":
@@ -1347,12 +1352,14 @@ def robot_mode_check(variables, now):
                 
                 robot.stop(motor3,motor4)
                 
+                
+                
                 lowest = servo2.low - 10                
                 servo2.move_slowly(lowest, config.GRIPPER_STEP_MS, low=lowest)
                 
                 
                 robot.forward(motor3,motor4, c.DRIVE_SPEED/2, c.DRIVE_SPEED/2)
-                utime.sleep_ms(1000)
+                utime.sleep_ms(1300)
                 
                 
                 
@@ -1438,6 +1445,7 @@ def robot_mode_check(variables, now):
                  leds,                  #29
                  yellow_flash_timer,    #30
                  strict,                #31
+                 correction_timeout,    #32
                  )
     #condense and return new values of variables
 
@@ -1463,6 +1471,7 @@ def initialise_main_variables():
     holdoff_until_reverse=0
     yellow_flash_timer=0
     strict=False
+    correction_timeout=0
     
     
     # ADDED (2026-10-15): state for the fixed turns.
@@ -1562,5 +1571,6 @@ def initialise_main_variables():
                  leds,                  #29
                  yellow_flash_timer,    #30
                  strict,                #31
+                 correction_timeout,    #32
                  )
     return variables
