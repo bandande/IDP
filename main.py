@@ -94,11 +94,18 @@ def main():
                 # FIRST, in the start box) was a test shortcut; the pick-up is
                 # now tested on its own with tests/test_pickup.py, starting
                 # right after the turn into a box.
-                variables[16].queue=[
-                    "deliver",
-                    "collect",
-                                     
-                ]+variables[16].queue
+                
+                if robot.box_count >= 3:
+                    variables[16].queue=[
+                        "go_back", 
+                        "deliver",
+                        "collect",                                                                   
+                    ]+variables[16].queue
+                else:
+                    variables[16].queue=[
+                        "deliver",
+                        "collect",                                            
+                    ]+variables[16].queue
             
             
             variables, now = f.robot_mode_check(variables, now)
