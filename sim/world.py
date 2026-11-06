@@ -1,19 +1,3 @@
-"""
-The simulated world: the table, the robot's motion and its sensors.
-
-The robot is a differential drive: two driven wheels on the REAR axle, the
-row of four line sensors at the front (see RobotSpec). The robot code runs
-unchanged on top of the fake machine / utime modules; they call into the
-World for time, inputs and outputs:
-  * time only moves when the code sleeps or touches the hardware/clock;
-    advance() then integrates the motion in small steps,
-  * motor DIR pins and PWM duty set the wheel speeds (with a lag),
-  * line sensor pins read the table under each sensor,
-  * crash sensor pins read the simulated buttons (press() / scheduled).
-The world stops the run (raises SimStop) at the time limit, or when the
-robot's body hits a rack or leaves the table.
-"""
-
 import math
 
 
@@ -29,9 +13,8 @@ class SimStop(BaseException):
 class RobotSpec:
     """Robot geometry and motor model. Lengths in metres.
 
-    Defaults are ESTIMATES from the photo of 2026-10-19 - measure the real
-    robot and override them (sim.run --spec key=value ...).
-    """
+    Defaults are ESTIMATES from a photo - measure the real
+    robot and override them (sim.run --spec key=value ...)."""
 
     def __init__(self, **kw):
         # Distance between the two wheel centres (photo: ~0.27 m). 0.26 also
@@ -43,9 +26,7 @@ class RobotSpec:
         # The inner pair must both see a centred line (bench test: 0110).
         self.sensor_lat = (0.055, 0.009, -0.009, -0.055)
         # Wheel speed at 100 % PWM (m/s). ~0.15-0.20 matches the teammate's tuning on
-        # the real table (main.py, 2026-10-19): at 60 % the robot needs
-        # NODE_FORWARD_MS = 1600 ms to move ~sensor_ahead, and a 1700 ms spin
-        # at 60 % is about a quarter turn.
+        # the real table (main.py,.
         self.vmax = 0.20
         self.tau = 0.06              # wheel speed lag (first-order time constant, s)
         self.deadband = 0.0          # PWM fraction below which a wheel does not turn
@@ -87,9 +68,6 @@ class World:
         self.stop_on_collision = stop_on_collision
         self.out_levels = {}            # output pin -> level
         self.duty = {}                  # pwm pin -> duty_u16
-        # ADDED (2026-10-27): pwm pin -> (lowest, highest) NON-ZERO duty sent
-        # during the whole run. sim/check.py turns the servo pins' values into
-        # angles to check that no servo ever left its safe range.
         self.duty_range = {}
         self.inputs = dict(pins.get("crash", {}))   # input pin -> level (buttons)
         self._line_pin_index = {p: i for i, p in enumerate(pins["line"])}
@@ -109,9 +87,6 @@ class World:
         self.pad_poles = {}             # pad node -> "north" / "south"
         self.boxes = set()              # dead-end nodes with a box in the rack slot ahead
         self._box_rects = []            # (name, x0, y0, x1, y1)
-        # ADDED (2026-10-26): a box to pick up on each pad, seen by the front
-        # ToF; it is taken away when the gripper closes in front of it and the
-        # robot then carries it (its magnet stays at the magnet sensor).
         self._pickup_rects = []         # (pad name, x0, y0, x1, y1)
         self.carrying = None            # pad name of the box the robot holds
         self.grip_pin = None            # servo2 signal pin
@@ -137,19 +112,12 @@ class World:
         self.ir_pin = ir_pin
         self.light = light
         self.ir_when = ir_when
-        # ADDED (2026-10-26): boxes to pick up, one per pad (see __init__)
         self._pickup_rects = [self._pickup_rect(pad["name"]) for pad in self.track.pads]
         self.carrying = None
         self.grip_pin = grip_pin
         self.grip_closed_duty = grip_closed_duty
         if ir_pin is not None:
             self.inputs[ir_pin] = 1     # TSOP4838 output idles HIGH
-
-    def add_box(self, node):
-        """A box has been put into the rack slot at the end of rung `node`."""
-        if node not in self.boxes:
-            self.boxes.add(node)
-            self._box_rects.append(self._box_rect(node))
 
     def _box_rect(self, node):
         """A box in the rack slot just beyond the dead end `node`."""
@@ -167,7 +135,7 @@ class World:
         return (node, min(xs), min(ys), max(xs), max(ys))
 
     def _pickup_rect(self, pad):
-        """ADDED (2026-10-26): the box to pick up on `pad`: a 5 cm square on
+        """The box to pick up on `pad`: a 5 cm square on
         the pad centre."""
         bx, by = self.track.nodes[pad]
         return (pad, bx - 0.025, by - 0.025, bx + 0.025, by + 0.025)
@@ -224,22 +192,11 @@ class World:
 
     def pwm_output(self, pin, duty):
         self.duty[pin] = duty
-        # ADDED (2026-10-27): remember the lowest / highest duty of each pin
-        # (0 = no pulses, e.g. a motor switched off or a limp servo: skipped)
         if duty:
             low, high = self.duty_range.get(pin, (duty, duty))
             self.duty_range[pin] = (min(low, duty), max(high, duty))
-        # ADDED (2026-10-26): servo2 closing with a pick-up box right in front
-        # of the nose (front ToF 80 mm or less, its ray hitting that box)
-        # takes the box.
         if (pin == self.grip_pin and duty and self.grip_closed_duty is not None
                 and duty <= self.grip_closed_duty and self.carrying is None):
-            # FIX (2026-10-27): take the NEAREST box on the ToF's ray, and only
-            # if it is 80 mm or closer. Before, the first box in the list that
-            # the ray hit at any distance was taken: at PAD_YELLOW (facing
-            # west) the ray also hits the PAD_GREEN box across the table, on
-            # the same row, and the robot "carried" the green box (and its
-            # magnet pole).
             nearest, nearest_d = None, None
             for rect in self._pickup_rects:
                 rd = self._ahead_distance(rect)
@@ -263,7 +220,6 @@ class World:
 
     def magnet_field_mv(self):
         """Field at the magnet sensor: +-600 mV within 10 cm of a pad with a magnet."""
-        # ADDED (2026-10-26): a carried box keeps its magnet at the sensor
         if self.carrying is not None:
             pole = self.pad_poles.get(self.carrying)
             if pole is not None:
@@ -288,10 +244,9 @@ class World:
         ox, oy = self.nose()
         dx, dy = math.cos(self.th), math.sin(self.th)
         best = None
-        for name, x0, y0, x1, y1 in self._box_rects + self._pickup_rects:   # CHANGED (2026-10-26)
+        for name, x0, y0, x1, y1 in self._box_rects + self._pickup_rects:
             if x0 <= ox <= x1 and y0 <= oy <= y1:
                 return 15     # pressed against a box: a real VL53L0X reads "very close" (or garbage)
-        # CHANGED (2026-10-26): the boxes on the pick-up pads are seen too
         rects = ([r[1:] for r in self._box_rects] + [r[1:] for r in self._pickup_rects]
                  + [(0.0, 0.0, self.track.width, self.track.length)])
         for i, (x0, y0, x1, y1) in enumerate(rects):
@@ -303,7 +258,7 @@ class World:
         return int(best * 1000)
 
     def rear_distance_mm(self, max_mm=1200):
-        """ADDED (2026-10-27): rear ToF (config.REAR_TOF, at the robot's tail):
+        """Rear ToF (config.REAR_TOF, at the robot's tail):
         distance straight backwards to a box in a slot / on a pad or the table
         edge, like front_distance_mm() but from the back of the body."""
         b = self.spec.body_back
@@ -321,9 +276,8 @@ class World:
         return int(best * 1000)
 
     def _ahead_distance(self, rect):
-        """ADDED (2026-10-26), CHANGED (2026-10-27): distance (m) along the
-        front ToF's ray to this box, or None if the ray misses it (it was
-        _ahead_hits(), which only said hit / miss)."""
+        """Distance (m) along the front ToF's ray to this box, or None if the
+        ray misses it."""
         ox, oy = self.nose()
         if rect[1] <= ox <= rect[3] and rect[2] <= oy <= rect[4]:
             return 0.0          # the nose is pushed into the box (front ToF reads 15 mm then)

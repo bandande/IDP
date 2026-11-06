@@ -1,19 +1,3 @@
-"""
-Hardware interface for the 4 x DFRobot SEN0017 line tracking sensors.
-
-Each SEN0017 has one digital (TTL) output: HIGH over white, LOW over black
-(DFRobot wiki). Supply 3.3-5 V; power them from the Pico 3V3 so the output can
-go straight to a GPIO. Mount them 1-2 cm above the floor.
-
-Wiring: VCC -> 3V3, GND -> GND, signal -> the GP pins in config.py
-(LINE_OUTER_LEFT_PIN, LINE_INNER_LEFT_PIN, LINE_INNER_RIGHT_PIN,
-LINE_OUTER_RIGHT_PIN), ordered left to right across the robot.
-
-read() returns the 4-bit mask used by sensors/line_processing.py
-(bit set = white = line). All processing (steering error, junctions, turns)
-lives in line_processing.py so it can be tested without hardware.
-"""
-
 from machine import Pin
 
 from sensors.line_processing import (OUTER_LEFT, INNER_LEFT, INNER_RIGHT,

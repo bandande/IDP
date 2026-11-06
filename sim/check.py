@@ -1,59 +1,3 @@
-"""
-Regression check: run this after every change to the robot code.
-
-    python -m sim.check            (from the repository root, takes ~1 minute)
-
-It checks MAP.py and then runs the robot's real main.py in the simulator in
-several situations, printing PASS / FAIL for each. The simulated table and
-the robot's speeds are estimates, so a PASS means "the logic works"; the
-real table still needs testing.
-
-  map          every pad and drop slot in MAP.py can be reached from START;
-               no link is one-way (except the start box corners, which are
-               never driven along)
-  top level    north pole in GREEN_1 -> TOP level: the robot waits at the
-               traffic light, then drops the box at LEFT_TOP_DROP_1
-  bottom level south pole in GREEN_1 -> BOTTOM level: drop at
-               LEFT_BOTTOM_DROP_1
-  full slot    a box is already in LEFT_BOTTOM_DROP_1: the robot sees it,
-               skips it and drops at LEFT_BOTTOM_DROP_2
-  red light    the light is red when the robot reaches the ramp: it waits,
-               then goes when it turns green
-  pause/reset  a short press pauses (no wheel turns) and the next press
-               continues; a long press stops and resets
-  pick-up      ADDED (2026-10-27): the pick-up sequence on its own
-               (tests/test_pickup.py, which runs control/pickup.py after
-               the start press). The robot stands where the turn into the
-               green pick-up box (PAD_GREEN) ends: rear axle on the junction
-               W_PAD1, facing east along the stub. It must print
-               "pickup: to_box", "pickup: grab", "pickup: u_turn",
-               "pickup: back_to_main", "pickup: done" in this order (and no
-               "pickup: failed"), be really close to the box when it grabs
-               (front distance 60 mm or less), hold the box at the end and
-               stop back at the side line facing west. Run for all four
-               boxes. CHANGED (2026-10-27): the gripper servos must also
-               stay inside config.SERVO_SAFE_RANGE the whole time.
-  no grab sensor
-               ADDED (2026-10-27): the same pick-up test with the grab
-               distance sensor not started: it must print "pickup: failed"
-               (no grab sensor) and the robot must not move at all.
-  drop-off     ADDED (2026-10-27): the drop-off on its own
-               (tests/test_dropoff.py -> control/dropoff.py
-               release_and_push), presses at 0.3 / 4 / 8 s. The robot
-               stands at the end of the rung to LEFT_BOTTOM_DROP_1 (rear
-               axle 0.20 m behind ORANGE_W1), facing the rack (east). It
-               must print the six "dropoff: ..." lines in order, back off /
-               push / back out (each a real move, the push reaching past the
-               point where the box was let go), not crash or hit the rack,
-               end a little BEHIND its start (back + exit > push), still
-               facing the rack, with servo2 open (top of its safe range).
-               The servos must stay inside their safe ranges, except servo2
-               down to config.SERVO_PUSH_ANGLE for the push.
-
-Each run is checked up to the first box drop; driving out of a drop slot is
-being reworked (custom drop-off function), so the runs stop there.
-"""
-
 import math
 import os
 import sys
@@ -119,9 +63,6 @@ def _dropped_at(notes, slot):
     return []
 
 
-# ADDED (2026-10-27): servo angles, read back from the PWM duty the robot
-# code sent (actuators/servo.py: duty = MIN_DUTY + angle / MAX_ANGLE *
-# (MAX_DUTY - MIN_DUTY), so angle = the same formula the other way round).
 def _duty_to_angle(duty):
     from actuators.servo import Servo
     return (duty - Servo.MIN_DUTY) * Servo.MAX_ANGLE / float(Servo.MAX_DUTY - Servo.MIN_DUTY)
@@ -138,7 +79,7 @@ def _servo_angle(world, name):
 
 
 def _servo_range_problems(world, push_allowed=False):
-    """ADDED (2026-10-27): a problem for every gripper servo that was sent an
+    """A problem for every gripper servo that was sent an
     angle outside config.SERVO_SAFE_RANGE at any time in the run.
     push_allowed=True: servo2 may also go down to config.SERVO_PUSH_ANGLE
     (the drop-off push, the only allowed exception)."""
@@ -161,7 +102,7 @@ def _servo_range_problems(world, push_allowed=False):
 
 
 def _phase_order_problems(notes, prefix, names):
-    """ADDED (2026-10-27): problems if a line starting with `prefix` + name
+    """Problems if a line starting with `prefix` + name
     was never printed, or printed before the one of the name before it.
     `names` lists them in the order they must appear."""
     problems = []
@@ -179,9 +120,6 @@ def _phase_order_problems(notes, prefix, names):
     return problems
 
 
-# ADDED (2026-10-27): the "pick-up" scenario (see the top of this file).
-# CHANGED (2026-10-27): run for every box, not only GREEN_1 (each box's
-# U-turn spins its own way, config.PICKUP_UTURN_DIRECTION).
 PICKUP_ENTRY = "tests.test_pickup:test_pickup"
 PICKUP_PHASES = ("to_box", "grab", "u_turn", "back_to_main", "done")   # must be printed in this order
 PICKUP_BOXES = ("GREEN_1", "GREEN_2", "RED_1", "RED_2")                 # MAP.py names of the four boxes
@@ -236,7 +174,6 @@ def check_pick_up(entry=PICKUP_ENTRY, seconds=40, box="GREEN_1", **options):
         if failed:
             problems.append("printed %r" % failed[0][3])
         # every phase printed, and in the right order
-        # (CHANGED 2026-10-27: the loop moved to _phase_order_problems, shared with the drop-off)
         problems += _phase_order_problems(notes, "pickup: ", PICKUP_PHASES)
         # how the run ended, when the sequence did not finish
         if not _printed(notes, "pickup: done") and not reason.startswith("robot code crashed"):
@@ -263,7 +200,6 @@ def check_pick_up(entry=PICKUP_ENTRY, seconds=40, box="GREEN_1", **options):
         heading = math.degrees(world.th) % 360
         if off_by(heading, heading_back) > 35.0:
             problems.append("ended facing %.0f deg (should be about %.0f)" % (heading, heading_back))
-        # ADDED (2026-10-27): the gripper servos never left their safe ranges
         problems += _servo_range_problems(world)
         return problems
 
@@ -275,7 +211,7 @@ def check_pick_up(entry=PICKUP_ENTRY, seconds=40, box="GREEN_1", **options):
 
 
 def check_pick_up_no_grab_sensor(box="GREEN_1"):
-    """ADDED (2026-10-27): the pick-up test (same start as check_pick_up)
+    """The pick-up test (same start as check_pick_up)
     with the grab distance sensor not started. The pick-up must fail at
     once because of the missing sensor, and the robot must not move at all.
     Returns a list of problems (empty = PASS)."""
@@ -308,7 +244,6 @@ def check_pick_up_no_grab_sensor(box="GREEN_1"):
         return ["the simulation itself failed: %s: %s" % (type(e).__name__, e)]
 
 
-# ADDED (2026-10-27): the "drop-off" scenario (see the top of this file).
 DROPOFF_ENTRY = "tests.test_dropoff:test_dropoff"
 DROPOFF_SLOT = "LEFT_BOTTOM_DROP_1"       # MAP.py name of the slot (simulator: ORANGE_W1)
 DROPOFF_PRESSES = (0.3, 4.0, 8.0)         # open the gripper / close it on the box / run the drop-off
@@ -452,10 +387,8 @@ def main():
     results.append(("pause/reset", _scenario("pause reset", pause_reset, seconds=30,
                                              presses=(0.3, 10.0, 14.0, 20.0), press_hold={20.0: 2000})))
 
-    # ADDED (2026-10-27): the pick-up sequence on its own (see check_pick_up)
     for box in PICKUP_BOXES:
         results.append(("pick-up " + box, check_pick_up(box=box)))
-    # ADDED (2026-10-27): no grab sensor -> no movement; the drop-off on its own
     results.append(("no grab sensor", check_pick_up_no_grab_sensor()))
     results.append(("drop-off", check_drop_off()))
 

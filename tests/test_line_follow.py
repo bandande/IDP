@@ -1,29 +1,3 @@
-"""
-Step 10: backup line follower on the real track.
-
-Do steps 2 (line sensors), 8 (button + LEDs) and 9 (motors) first.
-
-How to run
-  * Put the robot on the line, centred, facing along it.
-  * Press the start/stop button (config.START_STOP_SENSOR). The yellow LED
-    blinks for START_DELAY_MS so your hand can move away, then it follows.
-  * Press the button again (or let the front bump into something) to stop.
-  * Ctrl-C always stops the motors.
-LEDs: green = following, yellow = turning / on a junction, red = stopped.
-A status line is printed every 200 ms, plus junction events and the reason
-whenever the follower stops on its own.
-
-Options
-  test_line_follow(plan=["L", "S", "R"])  one entry per junction: L, R, S, stop
-  test_line_follow(dry_run=True)          motors stay off; push the robot by
-                                          hand to watch its decisions
-Tuning (config.py): FOLLOW_BASE_SPEED, FOLLOW_KP, FOLLOW_KD,
-FOLLOW_MAX_CORRECTION, FOLLOW_SEARCH_*, TURN_*, T_STEM_ACTION, LINE_LOST_MS.
-  * Wobbles from side to side: lower FOLLOW_KP or add FOLLOW_KD (e.g. 2-5).
-  * Runs off the line in bends: raise FOLLOW_KP or lower FOLLOW_BASE_SPEED.
-  * Turns too early / too late at junctions: raise / lower TURN_FORWARD_MS.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff, ticks_add
 
 import config

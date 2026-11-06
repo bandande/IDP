@@ -1,7 +1,5 @@
 import time
 import math
-import json
-import sys
 from machine import Pin, SoftI2C
 
 # ==================== HARDWARE CONFIGURATION ====================

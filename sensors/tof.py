@@ -1,55 +1,5 @@
-"""
-Interface for the 2 x VL53L0X time-of-flight distance sensors (I2C).
-
-Device facts
-  * 940 nm laser ranging sensor; I2C address 0x29 after power-up or reset.
-  * Supply 2.6-3.5 V: power it from the Pico 3V3 pin, not 5V.
-  * Useful range about 30-1200 mm in the default mode (less on dark or shiny
-    targets and in strong sunlight). Remove the protective film from the window.
-  * After each measurement register 0x13 (RESULT_INTERRUPT_STATUS) has a
-    non-zero low 3 bits. Register 0x14 (RESULT_RANGE_STATUS) holds the device
-    range status in bits 6..3 (11 = range complete / valid, 4 = no target).
-    The distance in mm is the big-endian 16-bit value at 0x1E (0x14 + 10);
-    8190 / 8191 mean "no target" / "signal fail". Writing 0x01 to 0x0B clears
-    the flag so the next sample can be detected.
-  * Both sensors answer at 0x29, so either put them on different I2C buses
-    (default in config.py) or share one bus and use XSHUT pins: hold one sensor
-    in reset (XSHUT low), give the other a new address via register 0x8A, then
-    release the first. Addresses are lost on power-off / reset, so
-    setup_tof_sensors() repeats this at every boot.
-
-Data processing
-  * The sensor ranges continuously; poll() only reads a sample when one is
-    ready (otherwise it costs one 1-byte I2C read), so it never blocks.
-  * RangeProcessor rejects invalid readings (bad status, error codes, beyond
-    max_valid_mm), applies the calibration offset and a median filter, so a
-    single spike or a single dropout is removed. A majority of "no target"
-    samples gives None.
-  * distance_mm is None when there is no target, the sensor is unavailable,
-    or the newest sample is older than stale_ms.
-  * ADDED (2026-10-29): if poll() was not called for longer than stale_ms,
-    the next poll() first throws all old readings away (median filter and
-    the sample waiting in the sensor), so a new read-out never starts with
-    values from the last one.
-  * If distance_mm stays None while raw_mm looks right, check range_status;
-    require_valid_status=False disables the status check.
-
-Usage
-    from sensors.tof import tof_from_config
-    tofs = tof_from_config()               # {"dist1": ToFSensor, "dist2": ToFSensor}
-    while True:
-        for sensor in tofs.values():
-            sensor.poll()
-        d = tofs["dist1"].distance_mm      # int mm, or None
-
-    For a yes/no "object is near" signal without chatter at the threshold:
-        from sensors.filters import Hysteresis
-        near = Hysteresis(on_below=80, off_above=100)
-        is_near = near.update(tofs["dist1"].distance_mm)
-"""
-
 from machine import Pin, I2C, SoftI2C
-from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us   # CHANGED (2026-10-27): + sleep_us
+from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us
 
 from sensors.filters import MedianFilter
 
@@ -57,10 +7,6 @@ DEFAULT_ADDRESS = 0x29
 STATUS_VALID = 11
 OUT_OF_RANGE_MM = 8190          # 8190 and above are "no target" / error codes
 
-# ADDED (2026-10-29): automatic restart (ToFSensor.poll()). A sensor that is
-# asked for values but gives no new one for RESTART_AFTER_MS has stopped
-# measuring (it normally gives one every period_ms, ~100 ms) and is started
-# again; never more often than once every RESTART_GAP_MS.
 RESTART_AFTER_MS = 1000
 RESTART_GAP_MS = 2000
 
@@ -73,7 +19,7 @@ _buses = {}
 
 
 def free_bus(sda, scl):
-    """ADDED (2026-10-27): prepare the two bus pins and free a stuck bus.
+    """Prepare the two bus pins and free a stuck bus.
 
     1. Internal pull-ups ON for SDA and SCL. The hardware I2C driver switches
        them on by itself, SoftI2C does NOT: its pins kept the Pico's power-up
@@ -112,9 +58,6 @@ def make_i2c(i2c_id, sda, scl, freq=400000):
     key = (i2c_id, sda, scl)
     bus = _buses.get(key)
     if bus is None:
-        # ADDED (2026-10-27): pull-ups on + free a stuck bus first (see
-        # free_bus). A line that stays LOW is only reported: creating the bus
-        # still works, the sensor then fails in begin() with an OSError.
         problem = free_bus(sda, scl)
         if problem is not None:
             print("WARNING: " + problem)
@@ -208,8 +151,6 @@ class ToFSensor:
                  driver_factory=None, period_ms=0):
         self.i2c = i2c
         self.name = name
-        # ADDED (2026-10-27): period_ms > 0 = "timed" ranging, one measurement
-        # every period_ms (laser off in between, less heat); 0 = back-to-back.
         self.period_ms = period_ms
         self._last_check_ms = None    # poll(): when the sensor was last asked over I2C
         self.address = address
@@ -224,8 +165,6 @@ class ToFSensor:
         self.last_error = None
         self.error_count = 0
         self.consecutive_errors = 0
-        # ADDED (2026-10-29): automatic restart of a sensor that stopped
-        # measuring (see poll() and RESTART_AFTER_MS at the top).
         self._started_once = False    # begin() has worked at least once
         self._waiting_since = None    # first poll() without a new value since the last value
         self._last_restart_ms = None  # when the last restart was tried
@@ -246,7 +185,7 @@ class ToFSensor:
             if self.long_range:
                 driver.set_Vcsel_pulse_period(driver.vcsel_period_type[0], 18)
                 driver.set_Vcsel_pulse_period(driver.vcsel_period_type[1], 14)
-            driver.start(self.period_ms)    # CHANGED (2026-10-27): timed mode when period_ms > 0
+            driver.start(self.period_ms)    # timed mode when period_ms > 0
         except Exception as e:  # a broken or missing sensor must not stop the robot
             self.driver = None
             self.available = False
@@ -256,15 +195,15 @@ class ToFSensor:
         self.available = True
         self.consecutive_errors = 0
         self.processor.reset()
-        self._started_once = True     # ADDED (2026-10-29)
-        self._waiting_since = None    # ADDED (2026-10-29)
-        self._last_check_ms = None    # ADDED (2026-10-29): ask at once after a (re)start
+        self._started_once = True
+        self._waiting_since = None
+        self._last_check_ms = None    # ask at once after a (re)start
         return True
 
     def poll(self, now_ms=None):
         """Read a new sample if one is ready. Returns True if one was consumed. Never raises.
 
-        ADDED (2026-10-29): if the sensor gives no new value for
+        If the sensor gives no new value for
         RESTART_AFTER_MS although it is being asked (it stopped measuring,
         e.g. after a short power dip, or the I2C bus keeps failing), it is
         restarted (begin() again, blocks ~0.1 s), at most once every
@@ -276,18 +215,9 @@ class ToFSensor:
             if self._started_once and self._restart_allowed(now_ms):
                 self._restart(now_ms, "it could not be restarted last time")
             return False
-        # ADDED (2026-10-29): nobody asked this sensor for longer than
-        # stale_ms (e.g. the grab sensor between two pick-ups: it is only
-        # read while driving up to a box). Everything it still holds is old,
-        # so throw it away first (see _forget_old_readings) and wait for a
-        # fresh measurement. Without this, the second pick-up got the
-        # distance of the FIRST one.
         if self._last_check_ms is not None and ticks_diff(now_ms, self._last_check_ms) > self.stale_ms:
             self._forget_old_readings(now_ms)
             return False
-        # ADDED (2026-10-27): in timed mode a new result only comes every
-        # period_ms, so ask the sensor at most every period_ms / 2 (less I2C
-        # traffic; asking every 5 ms loop only found "not ready" anyway).
         if self.period_ms and self._last_check_ms is not None \
                 and ticks_diff(now_ms, self._last_check_ms) < self.period_ms // 2:
             return False
@@ -296,23 +226,21 @@ class ToFSensor:
             self.i2c.readfrom_mem_into(self.address, _REG_INTERRUPT_STATUS, self._flag)
             if not self._flag[0] & 0x07:
                 self.consecutive_errors = 0
-                self._no_new_value(now_ms)    # ADDED (2026-10-29)
+                self._no_new_value(now_ms)
                 return False
             self.i2c.readfrom_mem_into(self.address, _REG_RANGE_STATUS, self._result)
             self.i2c.writeto_mem(self.address, _REG_INTERRUPT_CLEAR, b"\x01")
         except OSError as e:
             self._record_error(e)
-            self._no_new_value(now_ms)        # ADDED (2026-10-29)
+            self._no_new_value(now_ms)
             return False
         self.consecutive_errors = 0
-        self._waiting_since = None            # ADDED (2026-10-29): a new value came in
+        self._waiting_since = None            # a new value came in
         status = (self._result[0] >> 3) & 0x0F
         raw_mm = (self._result[10] << 8) | self._result[11]
         self.processor.update(raw_mm, status, now_ms)
         return True
 
-    # ADDED (2026-10-29): called by poll() when the sensor was not asked for
-    # longer than stale_ms.
     def _forget_old_readings(self, now_ms):
         """Throw away every old reading, so the next distance is a NEW one.
 
@@ -339,12 +267,6 @@ class ToFSensor:
             self._record_error(e)
             self._no_new_value(now_ms)
 
-    # ADDED (2026-10-29): the automatic restart (see poll()).
-    # The sensor measures all the time (one value every period_ms, also when
-    # nothing is in front: then the value says "no target"). So when it is
-    # asked again and again and still has nothing new for RESTART_AFTER_MS,
-    # it has stopped measuring. A long gap with NO asking (nobody called
-    # poll()) does not count: the first poll() afterwards finds a value.
     def _no_new_value(self, now_ms):
         """Called by poll() each time the sensor had no new value (or the
         I2C read failed). Restarts the sensor when that has gone on too long."""
@@ -404,19 +326,6 @@ class ToFSensor:
     def age_ms(self, now_ms=None):
         return self.processor.age_ms(now_ms)
 
-    def is_closer_than(self, mm, now_ms=None):
-        d = self.get_distance(now_ms)
-        return d is not None and d < mm
-
-    def read_blocking(self, timeout_ms=100):
-        """Wait (blocking) for the next sample and return the distance or None. For testing."""
-        start = ticks_ms()
-        while ticks_diff(ticks_ms(), start) < timeout_ms:
-            if self.poll():
-                return self.get_distance()
-            sleep_ms(1)
-        return None
-
     def stop(self):
         """Stop continuous ranging."""
         if self.driver is not None:
@@ -469,4 +378,4 @@ def tof_from_config(driver_factory=None):
                              median_size=config.TOF_MEDIAN_SIZE,
                              long_range=config.TOF_LONG_RANGE,
                              stale_ms=config.TOF_STALE_MS,
-                             period_ms=config.TOF_PERIOD_MS)    # ADDED (2026-10-27)
+                             period_ms=config.TOF_PERIOD_MS)

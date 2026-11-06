@@ -1,11 +1,3 @@
-"""
-Small signal filters shared by the sensor modules.
-
-Everything here is pure Python with no hardware access, so it can be unit
-tested on a PC (see tests/host). Time-based classes take an optional `now_ms`
-argument; when it is omitted the current `utime.ticks_ms()` is used.
-"""
-
 from utime import ticks_ms, ticks_diff
 
 
@@ -82,32 +74,3 @@ class Debouncer:
                 self.fell = True
         return self.state
 
-
-class Hysteresis:
-    """Two-threshold switch, e.g. "object is near" for a distance signal.
-
-    `state` becomes True when value <= on_below, False when value >= off_above,
-    and keeps its previous value in between. A `None` value (no reading) sets
-    the state to `none_state`; pass none_state=None to keep the previous state.
-    """
-
-    def __init__(self, on_below, off_above, initial=False, none_state=False):
-        if on_below > off_above:
-            raise ValueError("on_below must be <= off_above")
-        self.on_below = on_below
-        self.off_above = off_above
-        self.none_state = none_state
-        self.state = bool(initial)
-
-    def reset(self, state=False):
-        self.state = bool(state)
-
-    def update(self, value):
-        if value is None:
-            if self.none_state is not None:
-                self.state = bool(self.none_state)
-        elif value <= self.on_below:
-            self.state = True
-        elif value >= self.off_above:
-            self.state = False
-        return self.state

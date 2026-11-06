@@ -1,16 +1,3 @@
-"""
-Simulated stand-ins for sensors that are not driven through fake pins.
-
-SimToF replaces a VL53L0X: its distance is a ray cast into the simulated
-table (boxes in rack slots / on pads and the table edge; empty slots are
-open). CHANGED (2026-10-27): facing="front" (default) casts from the nose
-along the heading (the grab sensor, control.task_sensors.make_grab_tof);
-facing="rear" casts from the tail backwards (the rear sensor, make_rear_tof).
-The magnet sensor (ADC) and the IR receiver (pin edges) use the real driver
-code; the World feeds their pins.
-"""
-
-
 class SimToF:
     name = "front (simulated)"
     available = True

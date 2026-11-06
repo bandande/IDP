@@ -1,27 +1,3 @@
-"""
-Line-following data processing for the 4 x SEN0017 array (pure logic, no hardware).
-
-A reading is a 4-bit mask; a set bit means that sensor sees WHITE (the line):
-
-    bit 3        bit 2        bit 1         bit 0
-    OUTER_LEFT   INNER_LEFT   INNER_RIGHT   OUTER_RIGHT
-
-Assumed sensor geometry (check it on the robot):
-  * The two inner sensors are closer together than the line is wide, so both
-    see white when the robot is centred on the line.
-  * Each outer sensor is further from its inner neighbour than the line is
-    wide. An outer sensor therefore only sees white at a junction / branch,
-    or when the robot has drifted so far that both inner sensors are black.
-If your layout differs, pass your own `table` to LineTracker and re-check the
-junction rule in JunctionDetector.
-
-Contents:
-  ERROR_TABLE, line_error()  steering error from a single reading
-  LineTracker                error with memory + lost-line detection
-  JunctionEvent              what JunctionDetector reports
-  JunctionDetector           junction ENTER / EXIT events, shapes match MAP.py
-"""
-
 from utime import ticks_ms, ticks_diff
 
 OUTER_LEFT = 8
@@ -29,7 +5,6 @@ INNER_LEFT = 4
 INNER_RIGHT = 2
 OUTER_RIGHT = 1
 INNER = INNER_LEFT | INNER_RIGHT
-OUTER = OUTER_LEFT | OUTER_RIGHT
 
 # Steering error for every reading, indexed by the bitmask.
 # Negative = the line is LEFT of the robot centre (steer left), positive = right.
@@ -62,10 +37,6 @@ def bits_to_str(bits):
         out += "#" if bits & mask else "."
     return out
 
-
-def line_error(bits, table=ERROR_TABLE):
-    """Steering error in [-1.0, 1.0] for one reading, or None if no line is seen."""
-    return table[bits & 0x0F]
 
 
 class LineTracker:

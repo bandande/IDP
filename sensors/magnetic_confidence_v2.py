@@ -1,5 +1,4 @@
 import time
-import math
 from machine import ADC, Pin
 
 

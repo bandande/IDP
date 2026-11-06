@@ -1,55 +1,8 @@
-"""
-Sensors used by the TASK logic in main.py (line following does not need them).
-
-  * Magnet pole of the box being picked up (Hall sensor, analog) -> which rack
-    level (TOP / BOTTOM) the box must go to.          read_pole(), level_for_pole()
-  * Rear distance sensor (one VL53L0X at the back, config.REAR_TOF): while
-    the robot reverses into a drop branch -> is there already a box in the
-    slot?                                             slot_occupied(), rear_distance_now()
-  * Grab distance sensor (the other VL53L0X, at the front, config.GRAB_TOF):
-    how far away is the box to pick up? The gripper closes at GRAB_STOP_MM.
-                                                      box_distance_now(), box_distance(),
-                                                      box_seen(), box_in_reach()
-  * IR receiver at the traffic light -> may the robot go?
-                                                      light_reset(), light_update()
-
-Every sensor is optional: if one does not start (not wired, I2C error, ...)
-the matching check falls back to a safe default and a warning is printed,
-so the rest of the task still runs:
-  * no magnet sensor / no magnet found -> config.MAG_NO_POLE_LEVEL
-  * no rear distance sensor / no reading -> the slot is treated as FREE
-  * no grab distance sensor -> box distances are None (no box seen); the
-    caller decides what to do then (e.g. drive a fixed time instead)
-  * no IR receiver -> the light is treated as GREEN
-
-Usage (see main.py)
-    tasks = TaskSensors.from_config()
-    tasks.calibrate()                    # start-up, no magnets near the robot
-    pole = tasks.read_pole()             # "north", "south" or None (blocking, MAG_READ_MS)
-    level = tasks.level_for_pole(pole)   # "TOP" or "BOTTOM"
-    full = tasks.slot_occupied()         # True / False (blocking, SLOT_READ_MS)
-    d = tasks.box_distance_now()         # grab sensor, every loop while moving: mm or None
-    if tasks.box_in_reach(d): ...        # close enough to grab (config.GRAB_REACH_MM)
-    tasks.light_reset()                  # when the robot stops at the light
-    state = tasks.light_update()         # every loop: "red" or "green"
-
-The factory functions make_magnet / make_rear_tof / make_grab_tof / make_ir
-build the real sensors; the PC simulator (sim/) replaces them with
-simulated ones.
-"""
-
 from utime import ticks_ms, ticks_diff, sleep_ms
 
 import config
-from sensors.magnetic_confidence import measure_baseline   # ADDED (2026-10-30)
 
-# ADDED (2026-10-29): box_distance_now() prints its DEBUG line at most this
-# often (ms), instead of on every call.
 DEBUG_PRINT_MS = 200
-# ADDED (2026-10-29): the blocking distance reads below (slot_occupied,
-# rear_distance, box_distance) ask the sensor every TOF_POLL_MS (was every
-# 5 ms). The sensor itself measures once every config.TOF_PERIOD_MS (100 ms),
-# so this still catches every new value within 25 ms.
 TOF_POLL_MS = 25
 
 
@@ -71,7 +24,7 @@ def _start_tof(name, role):
                                 median_size=config.TOF_MEDIAN_SIZE,
                                 long_range=config.TOF_LONG_RANGE,
                                 stale_ms=config.TOF_STALE_MS,
-                                period_ms=config.TOF_PERIOD_MS)   # ADDED (2026-10-27): slower, cooler
+                                period_ms=config.TOF_PERIOD_MS)   # slower, cooler
     tof = sensors[name]
     if not tof.available:
         raise OSError("%s distance sensor %s did not start: %s" % (role, name, tof.last_error))
@@ -79,7 +32,7 @@ def _start_tof(name, role):
 
 
 def make_rear_tof():
-    """CHANGED (2026-10-27, was make_front_tof): start only the VL53L0X at the
+    """Start only the VL53L0X at the
     BACK (config.REAR_TOF): drop slot check while reversing into a branch."""
     return _start_tof(config.REAR_TOF, "rear")
 
@@ -102,7 +55,6 @@ def _median(values):
 class TaskSensors:
     def __init__(self, magnet=None, rear_tof=None, ir=None, grab_tof=None):
         self.magnet = magnet
-        # CHANGED (2026-10-27): rear_tof (was front_tof) - the sensor at the back
         self.rear_tof = rear_tof
         self.ir = ir
         # The grab sensor has the same interface as rear_tof (poll(),
@@ -110,13 +62,8 @@ class TaskSensors:
         # the other: tasks.grab_tof.poll(), tasks.grab_tof.get_distance().
         self.grab_tof = grab_tof
         self.last_field_mv = None     # strongest field seen by the last read_pole()
-        # ADDED (2026-10-30): zero point for detect_magnet_pole(), set by calibrate()
-        self.magnet_baseline_lsb = None
-        self.last_slot_mm = None      # median distance of the last slot_occupied()
-        self.last_box_mm = None       # median distance of the last box_distance()
-        # ADDED (2026-10-29): every reading kept by the last rear_distance() (for printing)
+        self.last_slot_mm = None      # median distance of the last rear_distance()
         self.last_rear_readings = []
-        # ADDED (2026-10-29): when box_distance_now() last printed its DEBUG line
         self._debug_print_ms = None
         self._ir_seen = None         # light_update(): time of the last IR activity
         self._ir_on_since = None      # light_update(): start of the current unbroken IR stretch
@@ -143,13 +90,7 @@ class TaskSensors:
     # -- magnet ---------------------------------------------------------------
     def calibrate(self):
         """Measure the magnet sensor's zero-field baseline. Call at start-up with
-        NO magnet near the robot (e.g. in the start box). Returns mV or None.
-        CHANGED (2026-10-30): also measures the zero point for the pick-up's
-        magnet check (sensors/magnetic_confidence.detect_magnet_pole), in
-        that function's own units, and keeps it in self.magnet_baseline_lsb.
-        100 readings instead of the function's own 10, for a steadier zero."""
-        self.magnet_baseline_lsb = measure_baseline(config.MAG_PIN, count=100)
-        print("magnet zero point for detect_magnet_pole: %.0f LSB" % self.magnet_baseline_lsb)
+        NO magnet near the robot (e.g. in the start box). Returns mV or None."""
         if self.magnet is None or self.magnet.mode != "analog":
             return None
         return self.magnet.calibrate_baseline()
@@ -178,44 +119,9 @@ class TaskSensors:
             return None
         return "north" if (best > 0) == (config.MAG_NORTH_SIGN > 0) else "south"
 
-    @staticmethod
-    def level_for_pole(pole):
-        """Rack level ("TOP" / "BOTTOM") for a pole, from config.MAG_POLE_LEVEL."""
-        if pole is None:
-            return config.MAG_NO_POLE_LEVEL
-        return config.MAG_POLE_LEVEL[pole]
-
     # -- rear distance sensor --------------------------------------------------
-    def slot_occupied(self, read_ms=None):
-        """Is there a box in the slot behind the robot (REAR sensor)? Collects distance readings
-        for read_ms (default config.SLOT_READ_MS) and compares their median with
-        config.SLOT_OCCUPIED_MM. No sensor or no valid reading -> False (free).
-        Blocking; the robot is stopped with its back to the slot."""
-        self.last_slot_mm = None
-        if self.rear_tof is None:
-            return False
-        if read_ms is None:
-            read_ms = config.SLOT_READ_MS
-        readings = []
-        start = ticks_ms()
-        while ticks_diff(ticks_ms(), start) < read_ms:
-            if self.rear_tof.poll():
-                d = self.rear_tof.get_distance()
-                if d is not None:
-                    readings.append(d)
-            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
-        if not readings:
-            return False      # nothing within range: the slot is open / empty
-        self.last_slot_mm = _median(readings)
-        return self.last_slot_mm < config.SLOT_OCCUPIED_MM
 
     # -- grab distance sensor: aiming at a box to pick up ------------------------
-    # How exactly the robot aims is still being decided. A typical use:
-    #   * while turning slowly from side to side, call box_distance_now() every
-    #     loop; the heading with the SMALLEST distance points at the box;
-    #   * then creep forwards, calling box_distance_now() every loop, and stop
-    #     as soon as box_in_reach(distance) is True;
-    #   * standing still, box_distance() gives a steadier value (a median).
     # Note: the VL53L0X does not measure reliably closer than about 30 mm, so
     # check what it really reads at grabbing distance before setting
     # config.GRAB_REACH_MM.
@@ -223,11 +129,7 @@ class TaskSensors:
         """Non-blocking: the newest filtered distance (mm) from the grab sensor,
         or None (nothing in range, reading too old, or no grab sensor). Call it
         every loop while the robot moves (the sensor gives ~10 new values / s,
-        one every config.TOF_PERIOD_MS - CHANGED 2026-10-27, was ~30 / s)."""
-        # CHANGED (2026-10-29): the DEBUG lines are kept, but printed at most
-        # once every DEBUG_PRINT_MS. Before, they were printed on EVERY call
-        # (every loop, many times per new reading): that floods the serial
-        # port and slows the main loop down.
+        one every config.TOF_PERIOD_MS)."""
         now = ticks_ms()
         print_now = self._debug_print_ms is None or ticks_diff(now, self._debug_print_ms) >= DEBUG_PRINT_MS
         if print_now:
@@ -244,18 +146,8 @@ class TaskSensors:
             print("DEBUG:", result, distance)
         return distance
 
-    def rear_distance_now(self):
-        """Non-blocking: the newest filtered distance (mm) from the rear
-        sensor, or None (nothing in range, reading too old, or no rear sensor)."""
-        if self.rear_tof is None:
-            # CHANGED (2026-10-29): clearer message
-            print("rear distance sensor not available")
-            return None
-        self.rear_tof.poll()
-        return self.rear_tof.get_distance()
-
     def rear_distance(self, read_ms=None):
-        """ADDED (2026-10-29): Blocking: the median distance (mm) seen by the
+        """Blocking: the median distance (mm) seen by the
         rear sensor during read_ms (default config.SLOT_READ_MS), or None if
         nothing was in range (or there is no rear sensor). Use it while the
         robot stands still, e.g. to check a drop slot behind the robot.
@@ -280,31 +172,10 @@ class TaskSensors:
                 d = self.rear_tof.get_distance()
                 if d is not None:
                     self.last_rear_readings.append(d)
-            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
+            sleep_ms(TOF_POLL_MS)
         if self.last_rear_readings:
             self.last_slot_mm = _median(self.last_rear_readings)
         return self.last_slot_mm
-
-    def box_distance(self, read_ms=None):
-        """Blocking: the median distance (mm) seen by the grab sensor during
-        read_ms (default config.GRAB_READ_MS), or None if nothing was in range.
-        Use it while the robot stands still."""
-        self.last_box_mm = None
-        if self.grab_tof is None:
-            return None
-        if read_ms is None:
-            read_ms = config.GRAB_READ_MS
-        readings = []
-        start = ticks_ms()
-        while ticks_diff(ticks_ms(), start) < read_ms:
-            if self.grab_tof.poll():
-                d = self.grab_tof.get_distance()
-                if d is not None:
-                    readings.append(d)
-            sleep_ms(TOF_POLL_MS)     # CHANGED (2026-10-29, was 5)
-        if readings:
-            self.last_box_mm = _median(readings)
-        return self.last_box_mm
 
     @staticmethod
     def box_seen(distance_mm):

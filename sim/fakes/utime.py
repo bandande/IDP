@@ -1,12 +1,3 @@
-"""
-Fake `utime` for running the robot code on a PC against the simulator.
-
-Time is SIMULATED: it only moves when the code sleeps or calls a time
-function (each call costs a little time, like on the Pico, so a busy loop
-without sleeps still advances). The world integrates the robot's motion
-whenever time moves. ticks_* wrap like MicroPython (period 2**30).
-"""
-
 from sim.fakes import _bus
 
 _PERIOD = 1 << 30
@@ -42,9 +33,6 @@ def ticks_ms():
     return (_now_us() // 1000) & _MASK
 
 
-def ticks_cpu():
-    return ticks_us()
-
 
 def ticks_diff(a, b):
     return ((a - b + _HALF) & _MASK) - _HALF
@@ -69,6 +57,3 @@ def sleep(s):
 def time():
     return _now_us() // 1000000
 
-
-def time_ns():
-    return _now_us() * 1000

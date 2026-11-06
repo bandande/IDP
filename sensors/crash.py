@@ -1,42 +1,3 @@
-"""
-Interface for the 2 x DFRobot SEN0138 crash sensors (SEN0138-L / SEN0138-R).
-
-Device facts
-  * A micro-switch with a roller lever on a small board with an on-board
-    pull-up resistor and a status LED. Pins: 1 = digital out, 2 = VCC, 3 = GND.
-  * Output HIGH (at the supply voltage) when released, LOW when pressed
-    (DFRobot's example code treats LOW as "pressed").
-  * The team schematic powers both boards from 3V3_OUT, so the output is at
-    most 3.3 V and goes straight to the Pico pin (left GP9, right GP8). DFRobot
-    rates the board for 5V, but the switch and its pull-up work at 3.3 V; only
-    the LED is dimmer.
-  * !!! If the boards are ever powered from 5V, the released output is 5V and
-    a voltage divider is REQUIRED (e.g. 10k from the output to the pin, 20k
-    from the pin to GND). RP2040 GPIOs are not 5V tolerant and the RP2350
-    only tolerates 5V while it is powered.
-  * On early RP2350 chips (A2 stepping, erratum E9) an input that is only
-    weakly pulled down can stay at about 2.2 V and read HIGH, so an unplugged
-    sensor may read "released". Always do a press test after wiring.
-
-Data processing
-  * Debounced level: the state only changes after the pin has been stable
-    for debounce_ms (CRASH_DEBOUNCE_MS).
-  * Short-bump capture: a hard IRQ on both edges remembers when a press
-    started and when it last released. If a bump starts and ends between two
-    update() calls (the main loop was busy), it still counts as a hit when it
-    lasted at least min_press_ms. Shorter glitches (e.g. motor noise) are
-    ignored.
-  * consume_hit() reports each press exactly once. BumperPair combines both
-    sensors; both pressed together means square contact with a wall / object.
-
-Usage
-    from sensors.crash import BumperPair
-    bumpers = BumperPair.from_config()
-    while True:
-        bumpers.update()
-        hit = bumpers.consume_hits()      # None, "LEFT", "RIGHT" or "BOTH"
-"""
-
 import machine
 import micropython
 from machine import Pin
@@ -68,13 +29,8 @@ class CrashSensor:
     pull: Pin.PULL_UP (default) / Pin.PULL_DOWN / None (no pull: only the sensor's own pull-up).
     use_irq: False disables the short-press capture (debounced polling only).
 
-    CHANGED (2026-10-27): the default pull is now Pin.PULL_UP (was None). If
-    a sensor's plug comes off, the pin used to float and could read LOW =
-    "pressed" at random - the start/stop sensor could then start the robot
-    by itself. With the internal pull-up an unplugged sensor reads
-    "released". The pull-up is parallel to the board's own pull-up, so a
-    connected sensor works exactly as before.
-    """
+    With the internal pull-up an unplugged sensor reads "released" (it
+    cannot start the robot by itself)."""
 
     def __init__(self, pin, active_low=True, debounce_ms=15, min_press_ms=3, name="crash",
                  use_irq=True, pull=Pin.PULL_UP):
@@ -200,12 +156,6 @@ class BumperPair:
         self.left.update(now_ms)
         self.right.update(now_ms)
         return self.which()
-
-    def any_pressed(self):
-        return self.left.pressed or self.right.pressed
-
-    def both_pressed(self):
-        return self.left.pressed and self.right.pressed
 
     def which(self):
         """Current debounced contact: None, "LEFT", "RIGHT" or "BOTH"."""

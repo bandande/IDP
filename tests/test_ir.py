@@ -1,21 +1,3 @@
-"""
-Step 4: TSOP4838 IR receiver.
-
-Wiring (lens facing you, legs down, left to right): 1 OUT -> GP14
-(physical 19), 2 GND -> GND (physical 38), 3 VS -> 3V3_OUT (physical 36,
-NOT 5V). No extra parts needed.
-Optional if the reading is noisy near the motors: about 100 ohm in series with
-VS and a few uF from VS to GND, close to the sensor (datasheet R1/C1).
-
-Checks:
-  1. At rest: "absent", no frames.
-  2. Point any TV remote at it and press a button: "PRESENT", frames printed.
-     Most remotes use NEC -> a decoded address/command is shown.
-  3. Point the traffic light at it: copy the printed frame list into the code
-     as a template and recognise it later with match_template().
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 from sensors.ir_receiver import IRReceiver, decode_nec, frame_signature

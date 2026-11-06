@@ -1,16 +1,3 @@
-"""
-Step 1 wiring check (nothing moves). Run after connecting any sensor.
-
-Prints config.validate() problems, scans the I2C bus of every ToF sensor
-(a VL53L0X answers at 41 = 0x29), then shows the raw level of every digital
-sensor pin once per second. Expected:
-  line pins    0 over black floor, 1 over white tape
-  crash pins   1 released, 0 pressed
-  IR pin       1 when idle, flickers to 0 while a remote control is pressed
-  magnet (ADC) analog Hall sensor: about 2.1-2.25 V with no magnet, moves with a magnet
-Stop with Ctrl-C.
-"""
-
 from machine import Pin, ADC
 from utime import sleep_ms, ticks_ms, ticks_diff
 

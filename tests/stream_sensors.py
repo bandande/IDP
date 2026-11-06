@@ -1,68 +1,8 @@
-"""
-Stream every sensor reading to the PC as JSON lines, for tools/sensor_viewer.py.
-
-Lines starting with "@H " describe the setup (sent once), lines starting with
-"@S " are samples (every period_ms), "@E " marks the end. Anything else is
-ordinary text (errors, tracebacks). The viewer starts this automatically; to
-run it by hand in the REPL:
-
-    from tests.stream_sensors import stream
-    stream()                                   # wiring from config.py
-    stream(line_pins=[16, 18, 19, 20], crash_pins=[], ir_pin=14, use_tof=False)
-
-line_pins: 4 GPIOs left to right, or [] to disable. crash_pins: [left, right]
-or []. ir_pin: GPIO or -1. mag_pin: GPIO or -1; on an ADC pin (GP26-28) the
-magnetic sensor is always read as an analog voltage, so both digital and analog
-modules can be seen. seconds: stop after this long (None = until Ctrl-C).
-ADDED (2026-10-27): a sensor pin that is a motor / servo pin
-(config.BOARD_PINS) or an LED pin (config.LED_PINS) is refused: that sensor
-is switched off and the reason is listed in "errors" of the @H line.
-(CHANGED: the example above used ir_pin=22, the yellow LED pin.)
-The pin monitor shows the raw level of every header
-GPIO except the motor, servo and LED pins and the I2C pins in use. Unused
-pins get the internal pull-up, so an unconnected pin reads a steady 1.
-Stop with Ctrl-C.
-
-ADDED (2026-10-23): servo control for the gripper calibration. servo_pins:
-{name: GPIO} (default config.SERVO_PINS, {} = no servos). The servos stay
-limp (no pulses) until the PC sends a command. While the stream runs, the PC
-can type one command per line:
-    servo1 180      move servo1 to 180 degrees (kept inside its
-                    config.SERVO_SAFE_RANGE; a servo without one is not used)
-    servo1 off      stop the pulses: servo1 goes limp
-    servo2 reset    the safe way to the start position (config.SERVO_RESET;
-                    with none set: straight to the middle of the safe
-                    range). A limp servo only accepts "reset"; angles are
-                    refused until then.
-The viewer's "Grab / Servo" tab sends these when the arrow keys are pressed.
-Every sample then reports the last angle of each servo ("servo" in @S).
-
-ADDED (2026-10-27): DROP-OFF CALIBRATION commands (the viewer's "Drop-off
-calibration" section on the Grab / Servo tab sends them):
-    drive 100       both wheels forwards at config.DROP_MOVE_SPEED for 100 ms,
-                    then they stop by themselves (the stream keeps running)
-    back 100        the same backwards
-                    (at most DRIVE_MAX_MS = 2000 ms per command; a new
-                    drive / back replaces the move that is running)
-    stop            wheels off at once
-    zero            net forward count back to 0 (stops a running move first)
-    release         let go of the box: servo2 opens by
-                    config.GRIPPER_RELEASE_DEG, one degree at a time
-    grab            pick a box up from the ground and lift it: servo2 open,
-                    servo1 down, servo2 closed, servo1 up (about 2 s)
-Every sample reports "drive": [net forward ms, moving]. Net forward ms = the
-time the wheels really ran since the stream started, forwards counted +,
-backwards -. The motor pins are only used after the first drive / back
-command, and the wheels are always switched off when the stream stops.
-"""
-
 import json
 import sys
 from machine import Pin
 from utime import sleep_ms, ticks_ms, ticks_diff
 
-# ADDED (2026-10-23): select.poll tells whether the PC has sent characters,
-# so the loop can read commands without waiting (blocking) for them.
 try:
     import select
 except ImportError:
@@ -91,7 +31,7 @@ def default_monitor_pins(use_tof=True):
 
 
 def _output_pin_use(gp):
-    """ADDED (2026-10-27): what the robot uses GPIO `gp` for if it is one of
+    """What the robot uses GPIO `gp` for if it is one of
     its OUTPUT pins - config.BOARD_PINS (motors, servos) or config.LED_PINS -
     else None. A sensor must never be set up on such a pin: the sensor
     classes and the pin monitor make the pin an input with the internal
@@ -105,7 +45,7 @@ def _output_pin_use(gp):
 
 
 def _refuse_output_pins(what, pins, errors):
-    """ADDED (2026-10-27): True if any GPIO in `pins` is a robot output pin
+    """True if any GPIO in `pins` is a robot output pin
     (see _output_pin_use). Each such pin adds one message to `errors` (the
     list the viewer shows in its log). `what` names the sensor."""
     refused = False
@@ -123,7 +63,7 @@ def _emit(tag, obj):
 
 
 class CommandReader:
-    """ADDED (2026-10-23): collects the command lines the PC types while the
+    """Collects the command lines the PC types while the
     stream runs, without ever waiting for them.
 
     lines() returns the complete lines received since the last call (usually
@@ -157,7 +97,7 @@ class CommandReader:
 
 
 def servo_command(line, servos, events, free=False):
-    """ADDED (2026-10-23): carry out one command line, e.g. "servo1 135" or
+    """Carry out one command line, e.g. "servo1 135" or
     "servo1 off". Problems are reported as events (shown in the viewer's log).
     free = calibration mode (see stream(servo_free=True))."""
     parts = line.split()
@@ -170,10 +110,8 @@ def servo_command(line, servos, events, free=False):
         events.append("%s off (limp)" % parts[0])
         return
     if parts[1] == "reset":
-        # ADDED (2026-10-23): the safe way to the start position
         # (config.SERVO_RESET, or straight to the middle of the safe range).
-        # The stream pauses while it runs (CHANGED 2026-10-27: also without
-        # a path - reset() now waits SERVO_RESET_SETTLE_MS after the jump).
+        # The stream pauses while it runs.
         angle = servo.reset(config.SERVO_RESET_SETTLE_MS, config.SERVO_RESET_STEP_MS)
         if servo.reset_path is None:
             events.append("%s reset: straight to the middle of its safe range, %d deg" % (parts[0], angle))
@@ -187,11 +125,8 @@ def servo_command(line, servos, events, free=False):
         return
     if servo.angle() is None:
         if free:
-            # ADDED (2026-10-26): calibration mode (no safe range known after
-            # the hardware change): start straight at the angle asked for.
             events.append("%s started at %d deg (calibration mode)" % (parts[0], servo.start_at(angle)))
             return
-        # CHANGED (2026-10-23): a limp servo only starts with "reset"
         events.append("%s has no pulses yet: send '%s reset' first" % (parts[0], parts[0]))
         return
     if angle < servo.low or angle > servo.high:
@@ -201,21 +136,18 @@ def servo_command(line, servos, events, free=False):
 
 
 # ---------------------------------------------------------------------------
-# ADDED (2026-10-27): drop-off calibration - short timed drives, "release"
-# and "grab" (see the top of this file).
-# ---------------------------------------------------------------------------
 DRIVE_MAX_MS = 2000     # one "drive" / "back" command never runs longer than this
 
 
 def _signed(ms):
-    """ADDED (2026-10-27): 600 -> "+600", -200 -> "-200" (for the event lines)."""
+    """600 -> "+600", -200 -> "-200" (for the event lines)."""
     if ms >= 0:
         return "+%d" % ms
     return "%d" % ms
 
 
 class DriveSteps:
-    """ADDED (2026-10-27): short timed drives for the drop-off calibration.
+    """Short timed drives for the drop-off calibration.
 
     start(sign, ms) switches both wheels on at `speed` % (forwards for
     sign +1, backwards for sign -1). update(), called in every loop of the
@@ -332,7 +264,7 @@ class DriveSteps:
 
 
 def drive_command(line, drive, events):
-    """ADDED (2026-10-27): carry out a drive command of the drop-off
+    """Carry out a drive command of the drop-off
     calibration: "drive <ms>", "back <ms>", "stop" or "zero". Returns True if
     `line` was one of them (otherwise the caller tries the other commands).
     Every command adds one event line (shown in the viewer's log)."""
@@ -386,7 +318,7 @@ def drive_command(line, drive, events):
 
 
 def release_command(servos, events):
-    """ADDED (2026-10-27): "release" - let go of the box, the same move as
+    """"release" - let go of the box, the same move as
     the robot's drop-off (actuators/gripper.py release_box): servo2 opens by
     config.GRIPPER_RELEASE_DEG from its present angle, one degree at a time
     (Servo.move_slowly). It never goes past the open (high) end of servo2's
@@ -412,7 +344,7 @@ def release_command(servos, events):
 
 
 def grab_command(servos, events, free=False):
-    """ADDED (2026-10-27): "grab" - pick a box up from the ground and lift
+    """"grab" - pick a box up from the ground and lift
     it, e.g. one that slipped out during the drop-off calibration:
         1. servo2 to its high end (gripper open, before the arm goes down)
         2. servo1 to its low end  (arm down)
@@ -457,7 +389,7 @@ def grab_command(servos, events, free=False):
 
 
 def handle_command(line, servos, drive, events, free=False):
-    """ADDED (2026-10-27): one command line typed by the PC: a drive command
+    """One command line typed by the PC: a drive command
     (drive_command), "release", "grab" or a servo command (servo_command)."""
     if drive_command(line, drive, events):
         return
@@ -486,22 +418,12 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
         crash_pins = [config.CRASH_LEFT_PIN, config.CRASH_RIGHT_PIN]
     if ir_pin is None:
         ir_pin = config.IR_RX_PIN
-    # CHANGED (2026-10-27): the mag_pin default moved up here (from just
-    # before the magnetic sensor is made), so the pin check below sees it.
     if mag_pin is None:
         mag_pin = config.MAG_PIN
     if monitor is None:
         monitor = default_monitor_pins(use_tof)
     errors = []
 
-    # ADDED (2026-10-27): refuse every sensor pin typed by the user (the
-    # viewer's wiring fields, or a call by hand) that is a motor / servo pin
-    # (config.BOARD_PINS) or an LED pin (config.LED_PINS). Setting a sensor
-    # up there would put an input pull-up on an output pin. A refused sensor
-    # group is switched off and the reason goes into "errors" (shown in the
-    # viewer's log); refused pin-monitor pins are simply left out. The
-    # default pins from config.py are never refused: validate() keeps them
-    # apart from the board and LED pins.
     if _refuse_output_pins("line sensor", line_pins, errors):
         line_pins = []
     if _refuse_output_pins("crash sensor", crash_pins, errors):
@@ -574,15 +496,6 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
             if not s.available:
                 errors.append("tof %s not available: %s" % (name, s.last_error))
 
-    # ADDED (2026-10-23): the gripper servos. off() right after creating each
-    # one, so it gets no pulses (stays limp) until the PC sends a command.
-    # Each servo only accepts angles inside its config.SERVO_SAFE_RANGE; a
-    # servo without a safe range is left out (never moved).
-    # ADDED (2026-10-26): servo_free=True = CALIBRATION MODE, for measuring
-    # the safe ranges again after the gripper hardware changed: the ranges and
-    # resets in config.py are ignored, every servo may use 0 .. 270 (270 =
-    # 2.5 ms stays the hard limit in actuators/servo.py), and a limp servo
-    # starts straight at the first angle sent.
     if servo_pins is None:
         servo_pins = config.SERVO_PINS
     servos = {}
@@ -601,8 +514,6 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
         except Exception as e:
             errors.append("servo %s: %r" % (name, e))
     commands = CommandReader()
-    # ADDED (2026-10-27): drop-off calibration drives ("drive 100", "back 100",
-    # "stop", "zero"). Creating this does not touch the motor pins yet.
     drive = DriveSteps(config.DROP_MOVE_SPEED)
 
     # One reader per monitored pin; reuse the driver's view of pins it owns.
@@ -635,11 +546,9 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
         "tof": list(tofs),
         "scan": scan,
         "max_mm": config.TOF_MAX_VALID_MM,
-        # ADDED (2026-10-23): [name, GPIO, safe low, safe high, reset path or None] per servo
         "servo": [[name, servo_pins[name], servos[name].low, servos[name].high, servos[name].reset_path]
                   for name in sorted(servos)],
-        "servo_free": servo_free,       # ADDED (2026-10-26): calibration mode on?
-        # ADDED (2026-10-27): drop-off calibration drives: [speed %, longest command ms]
+        "servo_free": servo_free,       # calibration mode on?
         "drive": [drive.speed, DRIVE_MAX_MS],
         "errors": errors,
     })
@@ -648,7 +557,7 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
     start = last_emit = ticks_ms()
     try:
         while seconds is None or ticks_diff(ticks_ms(), start) < seconds * 1000:
-            drive.update()      # ADDED (2026-10-27): wheels off when a timed drive is over
+            drive.update()      # wheels off when a timed drive is over
             now = ticks_ms()
             bits = 0
             if line is not None:
@@ -679,10 +588,6 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
                     events.append("ir frame %d marks, mean mark %d us, mean space %d us, nec=%s, frame=%s" % (
                         n, mark, space, decode_nec(frame), frame[:100]))
                     frame = ir.get_frame()
-            # ADDED (2026-10-23): servo commands typed by the PC (viewer).
-            # CHANGED (2026-10-27): handle_command also knows the drop-off
-            # calibration commands (drive / back / stop / zero / release /
-            # grab); servo commands go on to servo_command as before.
             for text in commands.lines():
                 handle_command(text, servos, drive, events, servo_free)
 
@@ -705,22 +610,17 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
                     msg["mag"] = [mag.mv if mag.mode == "analog" else mag.raw(), mag.detected,
                                   mag.field_mv, mag.polarity, mag.detections, mag.baseline_mv]
                 if servos:
-                    # ADDED (2026-10-23): last angle set per servo (None = limp)
                     msg["servo"] = [[name, servos[name].angle()] for name in sorted(servos)]
-                # ADDED (2026-10-27): [net forward ms, moving] for the drop-off calibration
                 msg["drive"] = [drive.net_ms(), drive.moving()]
                 if events:
                     msg["ev"] = events
                     events = []
                 _emit("@S ", msg)
-            drive.update()      # ADDED (2026-10-27): checked again, so a drive ends close to its time
+            drive.update()      # checked again, so a drive ends close to its time
             sleep_ms(5)
     except KeyboardInterrupt:
         pass   # Ctrl-C from the viewer or the REPL: stop quietly
     finally:
-        # ADDED (2026-10-27): wheels off FIRST, whatever happened (end, error,
-        # Ctrl-C). Only motors that a drive command created are touched.
-        # The servos are handled below as before.
         drive.off()
         if ir is not None:
             ir.deinit()
@@ -729,7 +629,7 @@ def stream(line_pins=None, crash_pins=None, ir_pin=None, use_tof=True, monitor=N
             bumpers.right.deinit()
         for s in tofs.values():
             s.stop()
-        for s in servos.values():   # ADDED (2026-10-23): servos limp when the stream stops
+        for s in servos.values():   # servos limp when the stream stops
             s.off()
         print("@E stopped")
 

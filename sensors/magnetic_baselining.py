@@ -3,7 +3,6 @@ import math
 from machine import ADC, Pin
 
 
-
 def sample_magnetic_baseline(adc_pin, calibration_time_sec=1.0):
 
    

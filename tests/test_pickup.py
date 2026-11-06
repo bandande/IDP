@@ -1,66 +1,3 @@
-"""
-Pick-up calibration test: run ONLY the pick-up sequence (control/pickup.py),
-starting with the robot already standing in a red / green box stub.
-The robot does NOT drive the route from the start box.
-
-ADDED (2026-10-27)
-
-How to run (on the robot, from the REPL)
-    from tests.test_pickup import test_pickup; test_pickup()
-    test_pickup(seconds=30)      # shorter overall safety limit (default 60 s)
-    test_pickup(box="RED_2")     # ADDED (2026-10-27): the box the robot stands in
-                                 # (GREEN_1 default, GREEN_2, RED_1, RED_2): it sets
-                                 # the U-turn direction, so give the right one
-
-Before the start press
-  1. Put the robot by hand where it would be just after turning from the
-     main line into the box stub: the WHEELS on the junction, the LINE
-     SENSORS on the box's line, the robot FACING the box.
-  2. Start the test. It sets up the hardware like main.py does and prints
-     the magnet sensor's zero point (keep other magnets away from the robot
-     while it measures; the box itself is far enough away).
-  3. Press the start/stop button (config.START_STOP_SENSOR) once. The test
-     waits config.START_DELAY_MS so your hand is clear, resets the gripper
-     the safe way (gripper_start), then runs the pick-up sequence:
-     follow the line to the cross line, drive up to the box, grab it,
-     turn round and drive back to the main line.
-
-While it runs
-  * A line is printed whenever the sequence moves on to a new phase, and a
-    status line every PRINT_EVERY_MS: time since the start press, phase,
-    the four line sensors ("#" = white, "." = black, left to right) and the
-    last front distance the sequence measured.
-  * Press the start/stop button again to ABORT: the motors stop at once.
-    (While the gripper moves - about 2 s, the wheels stand still then - the
-    press is remembered and the test stops right after the grab.)
-  * After `seconds` (counted from the start press) the test stops by itself.
-  * Ctrl-C also stops the motors.
-  * ADDED (2026-10-27): if the GRAB distance sensor did not start, a warning
-    is printed (and the red LED is on) before the press, and after the press
-    the pick-up fails at once: the robot does not drive at all.
-
-At the end
-  * The motors are stopped and one summary line is printed:
-        pickup test result: <phase> ok=<True/False> - <message> (<time> ms)
-    <time> is how long the pick-up sequence itself ran (from pick.start()).
-  * After a successful pick-up the magnet pole of the box is read and printed
-    together with the rack level it means (config.MAG_POLE_LEVEL).
-  * The servos are NOT switched off: they keep holding the box. Power the
-    robot down (or run tests/test_servos.py) to let go of it.
-Tune the pick-up with the PICKUP_*, GRAB_* and GRIPPER_* values in config.py.
-
-PC simulator (the start button is pressed automatically at 0.3 s); this
-puts the wheels on the green box stub's junction, facing the box:
-    python -m sim.run tests.test_pickup:test_pickup --at W_PAD1 --heading east --back 0
-
-Safety
-  * The servos only move through actuators/gripper.py and the Servo class
-    (actuators/servo.py), which keep every angle inside
-    config.SERVO_SAFE_RANGE. This file never writes a servo PWM duty.
-  * Whatever happens (end, abort, error, Ctrl-C) both drive motors are
-    switched off in a `finally` block, the same way main.py does it.
-"""
-
 import machine
 import utime
 
@@ -99,14 +36,11 @@ def _wait_for_start_press(button):
 
 
 def test_pickup(seconds=60, box="GREEN_1"):
-    """Run the pick-up sequence once from inside a box stub (see the top of
-    this file). seconds = overall safety limit, counted from the start press
-    (None = no limit). box: ADDED (2026-10-27) which box the robot stands in
+    """Run the pick-up sequence once from inside a box stub.
+    seconds = overall safety limit, counted from the start press
+    (None = no limit). box: which box the robot stands in
     ("GREEN_1", "GREEN_2", "RED_1" or "RED_2"); it only decides the way the
     U-turn spins (config.PICKUP_UTURN_DIRECTION, away from the neighbour box)."""
-    # ADDED (2026-10-27): a mistyped box name (e.g. "green_1") used to fall
-    # back to a "left" U-turn without a word, which spins TOWARDS the
-    # neighbour box for GREEN_1 / RED_2. Refuse it before anything moves.
     if box not in config.PICKUP_UTURN_DIRECTION:
         raise ValueError("box must be one of %s, not %r"
                          % (", ".join(sorted(config.PICKUP_UTURN_DIRECTION)), box))
@@ -151,9 +85,6 @@ def test_pickup(seconds=60, box="GREEN_1"):
         # BEFORE the start press, while no magnet is near the robot.
         tasks = TaskSensors.from_config()
         print("magnet sensor zero point: %s mV" % tasks.calibrate())
-        # ADDED (2026-10-27): say it loudly before anything moves if the grab
-        # sensor is missing - the pick-up then fails at once (CHANGED: it
-        # used to drive to the cross line first and stop at "to_box").
         if tasks.grab_tof is None:
             # the pins are looked up in config, so this stays right after re-wiring
             specs = [t for t in config.TOF_SENSORS if t["name"] == config.GRAB_TOF]
@@ -161,7 +92,6 @@ def test_pickup(seconds=60, box="GREEN_1"):
                 pins = "physical pins %s / %s" % (config.physical_pin(specs[0]["sda"]),
                                                   config.physical_pin(specs[0]["scl"]))
             else:
-                # FIX (2026-10-27): this used to crash with an IndexError
                 pins = "NOT in config.TOF_SENSORS"
             print("WARNING: the GRAB distance sensor (%s, front, %s) did not start:"
                   " the pick-up will fail at once, the robot will not move. Check its wiring first."
@@ -178,16 +108,13 @@ def test_pickup(seconds=60, box="GREEN_1"):
 
         # The pick-up sequence. Made now, so a setup error shows up before
         # anything moves; it only starts driving after pick.start().
-        uturn = config.PICKUP_UTURN_DIRECTION[box]     # ADDED (2026-10-27); box checked above
+        uturn = config.PICKUP_UTURN_DIRECTION[box]     # box checked above
         pick = PickUp(robot, motor3, motor4, servo1, servo2, tasks, uturn)
 
         # ---- 2. Instructions, then wait for the start press -----------------
         print("pick-up test in box %s, U-turn spins %s (overall limit %s s)" % (box, uturn, seconds))
         print("place the robot: wheels on the junction, line sensors on the box's line, facing the box")
         print("press the button again during the run to abort")
-        # ADDED (2026-10-27): a light you can see on the robot: GREEN on =
-        # ready, waiting for the press (red too if the grab sensor is missing).
-        # A missing / broken LED board must not stop the test, hence the try.
         leds = None
         try:
             from actuators.leds import StatusLeds
@@ -272,8 +199,6 @@ def test_pickup(seconds=60, box="GREEN_1"):
         # After a successful pick-up the box (and its magnet) is in the
         # gripper: read which pole it shows. The robot is standing still.
         if finished and pick.ok:
-            # CHANGED (2026-10-27): the pole is read by the sequence itself,
-            # right after the grab (pick.pole); this only repeats the result.
             print("magnet pole of the box: %s -> rack level %s (only reported, no turn yet)"
                   % (pick.pole.upper() if pick.pole else "NOT FOUND", pick.level))
     finally:

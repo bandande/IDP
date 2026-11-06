@@ -1,23 +1,3 @@
-"""
-Step 2: 4 x SEN0017 line sensors.
-
-Wiring (team schematic): VCC -> 3V3_OUT (physical 36), GND -> GND (physical 38),
-OUT, left to right across the robot:
-    Edge Left   -> GP20 (physical 26)      Centre Right -> GP19 (physical 25)
-    Centre Left -> GP21 (physical 27)      Edge Right   -> GP18 (physical 24)
-No extra parts.
-
-Checks:
-  1. Over black floor the pattern is "....".
-  2. Hold white tape under each sensor in turn: the matching character becomes
-     '#', left to right. Wrong one flips -> fix the pin order in config.py.
-     All inverted -> set LINE_WHITE_IS_HIGH = False.
-  3. Centre the robot on a line: ".##." with error +0.00. Slide it sideways:
-     line to the left of the robot -> negative error.
-  4. Push the robot slowly over a junction: ENTER then EXIT events.
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 from sensors.line_sensor import LineSensorArray

@@ -15,15 +15,11 @@ class Motor:
         self.pwm.duty_u16(0)
         
     def Forward(self, speed=100):
-        speed = max(0, min(100, speed))        # FIX (2026-10-27): keep the duty inside 0 - 65535
+        speed = max(0, min(100, speed))        # keep the duty inside 0 - 65535
         self.mDir.value(0)                     # forward = 0 reverse = 1 motor
         self.pwm.duty_u16(int(65535 * speed / 100))  # speed range 0-100 motor
 
     def Reverse(self, speed=100):
-        # FIX (2026-10-27): clamp to 0 - 100 %. A negative speed (e.g. a
-        # steering correction larger than the base speed) gave a negative
-        # duty_u16, and more than 100 % a duty above 65535: neither is a valid
-        # PWM value, so the wheel speed was undefined.
         speed = max(0, min(100, speed))
         self.mDir.value(1)
         self.pwm.duty_u16(int(65535 * speed / 100))
@@ -47,27 +43,7 @@ def test_motors():
     robot=functions.Robot()
     
     
-    # print("Forward")
-    # robot.forward(motor3, motor4)
-    # # from control.start_stop import StartStopButton
-    # # button = StartStopButton.from_config()
-    # # is_pressed=True
-    # # try:
-    # #     while True:
-    # #         if not is_pressed and button.pressed():
-    # #             robot.forward(motor3, motor4)
-    # #             is_pressed=True
-    # #             sleep(1)
-    # #         elif is_pressed and button.pressed():
-                
-    # #             robot.forward(motor3, motor4, reverse=True)
-    # #             is_pressed=False
-    # #             sleep(1)
-    # # finally:
     
-    # FIX (2026-10-27): try / finally, so Ctrl-C (or an error) during one of
-    # the sleep(1) calls still switches both motors off. Before, the wheels
-    # kept turning after Ctrl-C until the Pico was reset.
     try:
         print("About")
         robot.about(motor3, motor4)
@@ -88,20 +64,6 @@ def test_motors():
     finally:
         robot.stop(motor3, motor4)
     
-    # count=0
-    # while count<1:
-    #     count+=1
-    #     print("Forward")
-    #     motor3.Forward(100)
-    #     motor4.Forward(100)
-
-    #     sleep(2)
-    #     print("Reverse")
-    #     motor3.Reverse()
-    #     motor4.Reverse()
-    #     sleep(1)
-    # motor3.off()
-    # motor4.off()
 
 if __name__ == "__main__":
     test_motors()

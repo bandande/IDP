@@ -1,47 +1,3 @@
-"""
-Interface for the Vishay TSOP4838 IR receiver module.
-
-What the device does
-  * It contains a photodiode, an amplifier, a 38 kHz band-pass filter and a
-    demodulator. It does NOT pass the 38 kHz carrier through: its OUT pin goes
-    LOW while it receives a burst of 38 kHz modulated IR and is HIGH otherwise.
-    Software therefore sees "marks" (LOW = IR burst present) and "spaces"
-    (HIGH = no IR), and information is carried by their durations.
-  * Pins (looking at the lens): 1 = OUT, 2 = GND, 3 = VS. Supply 2.0-5.5 V.
-    OUT has an internal 30k pull-up to VS, so power VS from 3V3: at 5V the
-    output would put 5V on the Pico pin. If the supply is noisy (motors), add
-    the RC filter from the datasheet (series resistor into VS, capacitor to GND).
-  * It is an AGC2 part made for remote-control data: bursts must be at least
-    10 carrier cycles (about 0.26 ms) and be followed by gaps. A CONTINUOUS
-    38 kHz signal (like DC light or lamps) is treated as noise and suppressed,
-    so a beacon that is simply "always on" may only give one short LOW pulse.
-    Beacons that send bursts or remote-control codes work well.
-
-What this module does
-  * A hard IRQ timestamps every edge into a pre-allocated ring buffer.
-  * process() (call it often from the main loop) turns edges into frames:
-    lists of durations in microseconds, alternating mark, space, mark, ...,
-    always starting and ending with a mark. A frame ends after frame_gap_us
-    of silence.
-  * signal_present(): IR activity within the last present_window_ms.
-  * decode_nec(frame): decodes the NEC protocol (the most common remote
-    control format; addr, ~addr, cmd, ~cmd, LSB first).
-  * frame_signature() / match_template(): for unknown beacons. Print a frame
-    once (print(ir.get_frame())), paste it into the code as a template, then
-    recognise it later with match_template(frame, template).
-
-Usage
-    from sensors.ir_receiver import IRReceiver, decode_nec
-    ir = IRReceiver.from_config()
-    while True:
-        ir.process()
-        if ir.signal_present():
-            ...
-        frame = ir.get_frame()           # list of durations in us, or None
-        if frame is not None:
-            code = decode_nec(frame)     # IRCode, or None if it is not NEC
-"""
-
 import array
 import machine
 import micropython
@@ -129,16 +85,6 @@ def frame_signature(durations):
     mean_space = sum(spaces) // len(spaces) if spaces else 0
     return (len(marks), mean_mark, mean_space, sum(durations))
 
-
-def match_template(durations, template, tolerance=0.25, min_abs_us=150):
-    """True if a frame has the same length as a recorded template and every
-    duration is within max(tolerance * expected, min_abs_us) of it."""
-    if not durations or len(durations) != len(template):
-        return False
-    for value, expected in zip(durations, template):
-        if not _near(value, expected, tolerance, min_abs_us):
-            return False
-    return True
 
 
 class IRReceiver:
@@ -267,10 +213,6 @@ class IRReceiver:
         """Current output level: 0 = IR burst being received, 1 = idle."""
         return self._pin.value()
 
-    def any(self):
-        """Number of complete frames waiting."""
-        return len(self._frames)
-
     def get_frame(self):
         """Oldest complete frame (list of us durations, mark first), or None."""
         if self._frames:
@@ -278,16 +220,8 @@ class IRReceiver:
         return None
 
     def clear(self):
-        """Drop queued frames and any frame in progress.
-
-        FIX (2026-10-27): also forget the "IR seen recently" flag. ticks_us()
-        wraps after about 17.9 minutes, so an edge more than ~8.9 minutes old
-        looks like it is in the FUTURE (negative ticks_diff); process() then
-        never cleared _recent and signal_present() said True. If the robot
-        stood switched on for 9+ minutes after the last stray IR pulse, the
-        traffic light (light_reset() calls clear()) could turn "green"
-        without any beacon. A real beacon sets the flag again with its next
-        burst (a few ms)."""
+        """Drop queued frames and any frame in progress. Also forgets the "IR seen recently"
+        flag; a real beacon sets it again with its next burst (a few ms)."""
         self._frames = []
         self._frame = None
         self._recent = False

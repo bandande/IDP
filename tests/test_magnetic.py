@@ -1,18 +1,3 @@
-"""
-Step 5: 3-wire Hall (magnetic) sensor.
-
-Wiring (team schematic, "Magnetometer"): 1 OUT -> GP26 (physical 31, ADC0),
-2 GND -> GND (physical 38), 3 VS -> 3V3_OUT (physical 36). No extra parts.
-
-Checks (analog module, config.MAG_MODE = "analog"):
-  1. With no magnet nearby the field stays within about +/-100 mV of zero.
-  2. A magnet held within 1 cm of the chip face: "MAGNET", field several
-     hundred mV; the other pole moves the field the other way.
-  3. Take it away: back to "-" within a second.
-The live curve in tools/sensor_viewer.py (Magnetic tab) shows the same data.
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 from sensors.magnetic import HallSensor

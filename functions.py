@@ -12,19 +12,9 @@ from actuators.servo import Servo
 import MAP
 import sensors.line_sensor as line_sensor
 from control.start_stop import StartStopButton
-# ADDED (2026-10-27): the pick-up sequence (red / green box) and the
-# gripper helpers now live in their own modules, so the bench calibration
-# test (tests/test_pickup.py) runs exactly the same code as the robot.
 from control.pickup import PickUp
-from control.dropoff import release_and_push     # ADDED (2026-10-27): let go + push the box in
-from control.dropoff import drive_in_and_drop    # ADDED (2026-10-27): drive into the branch, then the above
-from actuators.gripper import gripper_end, gripper_carry, gripper_start, grab_box, gripper_safe, release_box, gripper_lift
+from actuators.gripper import gripper_carry, gripper_start, gripper_safe, release_box, gripper_lift
 
-
-def degrees_to_time(degrees):
-    count=0
-    count=c.full_turn_time*degrees/360
-    return count
 
 def turn_to_direction(current_direction, turn):
     directions = ["north", "east", "south", "west"]
@@ -69,13 +59,6 @@ def direction_to_turn(current_direction, target_direction):
         return "left"
 
 def reset_map(old_phrases=("COLLECTED", "OCCUPIED")):
-    # FIX (2026-10-27): reset the map in RAM only. The old version rewrote
-    # MAP.py on the flash at EVERY start. If the power dipped or the program
-    # was interrupted during that write, MAP.py was left broken and the next
-    # start crashed at "from MAP import MAP" (OSError: 84 on the Pico on
-    # 2026-10-23). The robot code never writes the map back to the file
-    # anyway - it only changes the node types in memory while it runs - so
-    # setting them back in memory does the same job without touching flash.
     for node in MAP.MAP.values():
         if node.get("type") in old_phrases:
             node["type"] = "DEAD_END"
@@ -86,8 +69,6 @@ def reset_map(old_phrases=("COLLECTED", "OCCUPIED")):
 class Robot:
     
     def reset(self):
-        # self.position = "JUNCTION_LEFT_BOTTOM"
-        # self.direction = "west"
         
 
         self.previous_position = "START"
@@ -100,7 +81,6 @@ class Robot:
         self.mode_specific = []
         self.mode_extra_specific = ""
         # mode=(collecting, turning, stopping, straight, dropping)
-        # specific_mode=()
         
         self.queue: list[str | list]= [] # Macro is the largest. It is as follows- first element is the name, next elements are instructions
         
@@ -198,12 +178,10 @@ class Robot:
                 motor4.Forward(motor4_speed)
     def about(self, motor3, motor4, motor3_speed=None, motor4_speed=None, direction="right"):
             """motor3 is left. motor4 is right
-            CHANGED (2026-10-30): direction="right" (the default, as before)
-            turns round clockwise. direction="left" is the exact mirror image
+            direction="right" (the default) turns round clockwise. direction="left" is the exact mirror image
             (anticlockwise): the wheels swap roles and speeds. Used on the top
             level, where the U-turn must go towards the open side because of
-            the railings.
-            """
+            the railings."""
             if not motor3_speed:
                 motor3_speed=motor3.forward_speed
             if not motor4_speed:
@@ -217,39 +195,6 @@ class Robot:
             else:
                 motor3.Forward(motor3_speed)
                 motor4.Reverse(motor4_speed)
-    def backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
-            """motor3 is left. motor4 is right
-            """
-            if not motor3_speed:
-                motor3_speed=motor3.backward_speed
-            if not motor4_speed:
-                motor4_speed=motor4.backward_speed
-            self.motor_left=True
-            self.motor_right=True
-            motor3.Reverse(motor3_speed)
-            motor4.Reverse(motor4_speed)
-    def left_backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
-            """motor3 is left. motor4 is right
-            """
-            if not motor3_speed:
-                motor3_speed=motor3.backward_speed
-            if not motor4_speed:
-                motor4_speed=motor4.backward_speed
-            self.motor_left=True
-            self.motor_right=False
-            motor3.Reverse(motor3_speed)
-            motor4.off()
-    def right_backward(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
-            """motor3 is left. motor4 is right
-            """
-            if not motor3_speed:
-                motor3_speed=motor3.backward_speed
-            if not motor4_speed:
-                motor4_speed=motor4.backward_speed
-            self.motor_left=False
-            self.motor_right=True
-            motor3.off()
-            motor4.Reverse(motor4_speed)
     
     def stop(self, motor3, motor4, motor3_speed=None, motor4_speed=None):
                 """motor3 is left. motor4 is right
@@ -264,15 +209,12 @@ class Robot:
                 motor4.off()
     
     def spin(self, motor3, motor4, direction, speed):
-        """ADDED (2026-10-15): turn on the spot, "left" or "right".
+        """Turn on the spot, "left" or "right".
 
         One wheel drives forwards and the other backwards at the same power, so
         the robot rotates about the middle of its wheel axle and stays on the
-        junction. Robot.left / Robot.right are NOT used for junction turns: they
-        stop one wheel and pivot about it, which moves the robot sideways off
-        the junction while it turns, so it ends up beside the new line.
-        motor3 is the left wheel, motor4 the right wheel.
-        """
+        junction.
+        motor3 is the left wheel, motor4 the right wheel."""
         if direction == "left":
             motor3.Reverse(speed)
             motor4.Forward(speed)
@@ -283,7 +225,7 @@ class Robot:
         self.motor_right = True
 
     def pivot(self, motor3, motor4, direction, speed):
-        """ADDED (2026-10-30, experimental): turn about ONE wheel, "left" or
+        """Turn about ONE wheel, "left" or
         "right". The wheel on the inside of the turn stands still and the
         outside wheel drives forwards, so the robot rotates about the inside
         wheel. Unlike spin(), the robot then needs to drive on much less
@@ -349,12 +291,6 @@ class Robot:
             return ["Error position and location not found"]
 
         # Queue of locations to explore
-        # FIX (2026-10-15): MicroPython's collections.deque takes the maximum
-        # length as a required second argument and must start empty, so the
-        # old `deque([self.position])` raised "TypeError: function missing 1
-        # required positional arguments" on the Pico. len(MAP) is always
-        # enough room: in this breadth-first search every location is added
-        # to the queue at most once. (Works the same in CPython.)
         queue = deque((), len(MAP.MAP))
         queue.append(self.position)
 
@@ -393,12 +329,6 @@ class Robot:
     def move_to(self, location):
         # From one point to adjacent point
         if MAP.MAP.get(self.position) and MAP.MAP.get(location):
-            # FIX (2026-10-15): dict views (.keys(), .values()) cannot be
-            # indexed or searched with .index() - neither in CPython nor in
-            # MicroPython - so the old one-liner
-            #   MAP[self.position].keys()[MAP[self.position].values().index(location)]
-            # always raised an error. Instead, look through the four
-            # directions for the one whose neighbour is `location`.
             if self.position == location:
                 return []
             final_direction = None
@@ -418,10 +348,6 @@ class Robot:
         return ["straight", ["turning", turning, 90]]
     
     
-    def identify_junction(self):
-        # This can be called to see which kinds of junction it can be
-        pass
-
 def corrections(robot, motor3, motor4, motor_speed3=c.TURN_SPEED, motor_speed4=c.TURN_SPEED, reverse=None, time_count=0, strict=False):
     correction_motor_speed3=motor_speed3
     correction_motor_speed4=motor_speed4
@@ -471,25 +397,17 @@ def update_sensors(variables):
     return variables
 
 
-
-
-# CHANGED (2026-10-27): gripper_end, gripper_carry, gripper_start, grab_box
-# and release_box moved to actuators/gripper.py (imported at the top).
-
-
 def wait_for_start(button):
-    """ADDED (2026-10-15, safety): block until the start/stop button is pressed.
+    """Block until the start/stop button is pressed.
 
     The button is the crash sensor named in config.START_STOP_SENSOR (default
     "left" = Crash Sensor L, physical pin 12). Because the Pico runs main.py
     by itself at power-up, waiting here stops the robot from driving off as
     soon as it is switched on. After the press it waits config.START_DELAY_MS
-    so the hand that pressed the button is clear of the robot.
-    """
+    so the hand that pressed the button is clear of the robot."""
     print("press the start/stop button (%s crash sensor) to start" % config.START_STOP_SENSOR)
     while not button.pressed():
         utime.sleep_ms(5)
-        # print("hello")
     print("starting in 4000 ms")
 
 
@@ -512,28 +430,6 @@ def button_check(variables):
     if pressed:
 
         if is_started:
-            # CHANGED (2026-10-20): two kinds of stop (the button is the left
-            # front crash sensor, so bumping into something also stops):
-            #   * SHORT press = PAUSE: the motors stop and the robot keeps
-            #     everything (position, queue, mode, timers). The next press
-            #     continues exactly where it stopped.
-            #   * LONG press (held for LONG_PRESS_MS) = STOP AND RESET: the
-            #     robot forgets its route and position (robot.reset(): START,
-            #     facing north). Put it back in the start box, then press to
-            #     start again. What it has collected / delivered so far stays
-            #     marked in the map.
-            # (The old 2 x utime.sleep(1) after a stop were removed: a press
-            # during them was remembered and restarted the robot at once.)
-
-            # FIX (2026-10-20): read the button ONCE per loop. button.pressed()
-            # returns True only once for each press. The old code called it twice:
-            #     if button.pressed() and not is_started:    (1)
-            #     ...
-            #         if button.pressed():                   (2)
-            # While the robot was running, call (1) used up the press and then
-            # threw it away (because is_started was True), so call (2) almost
-            # never saw it: that is why the button sometimes did not stop the
-            # robot.
 
 
             # Remember what both motors were doing, so a pause can resume.
@@ -654,8 +550,6 @@ def robot_mode_check(variables, now):
             # If turning etc
             robot.mode=next_item[0]
             robot.mode_specific=next_item[1:]
-            # f.degrees_to_time(next_item[2]) # gets the count for that specific turn
-            # Write some code to get or use that time
                     
         elif next_item.isupper():
             print("destination:"+next_item)
@@ -676,25 +570,12 @@ def robot_mode_check(variables, now):
                 robot.queue = robot.queue[:-2]+[robot.queue[-1]]
                 print(robot.queue)
                         
-            # ADDED (2026-10-27): Prevent driving on into the drop branch.
-            # Like the pick-up above: from a drop JUNCTION into its DROP slot
-            # (a dead end) only the turn is kept; the "drop_off" mode then
-            # starts right after the turn and drives in itself for
-            # config.DROP_DRIVE_MS (measured from the turn, see config.py).
             if ("DROP" in next_item and not next_item.startswith("JUNCTION")
                 and robot.position.startswith("JUNCTION")):
                 # Remove straight
                 robot.queue = robot.queue[:-2]+[robot.queue[-1]]
                 print(robot.queue)
 
-            # # Prevent moving forwards when picking up the box.
-            # if (bool(re.match(r"^JUNCTION.*DROP",next_item))
-            #     and ("DROP" in robot.position and not robot.position.startswith("JUNCTION"))):
-            #     # Remove straight
-            #     robot.queue = robot.queue[:-2]+[robot.queue[-1]]
-            #     robot.previous_position=robot.position
-            #     robot.position=robot.objective
-            #     print(robot.queue)
     
             # Stops errors with turning because line spacing is too small
             # If next is a junction and currently at a junction and came from a drop, then add a small reverse
@@ -705,12 +586,6 @@ def robot_mode_check(variables, now):
                 robot.queue = robot.queue[:-1]+["reverse_straight"]+[robot.queue[-1]]
                 print(robot.queue)
     
-                        # ADDED (2026-10-20): traffic light. If the stretch from
-                        # here to next_item is in config.TRAFFIC_LIGHT_EDGES (the
-                        # ramp entrance: START -> TOP_CENTRE), put "wait_light"
-                        # between the turn and the drive. move_to() ended the queue
-                        # with [..., "straight", turn] and the queue is used from
-                        # the END, so this becomes: turn -> wait_light -> straight.
             
             if (robot.position, next_item) in config.TRAFFIC_LIGHT_EDGES:
                 robot.queue = robot.queue[:-1] + ["wait_light", robot.queue[-1]]
@@ -720,17 +595,6 @@ def robot_mode_check(variables, now):
                 print("I'm being strict!")
                 strict=True
 
-            # ADDED (2026-10-30, experimental): turn about one wheel (a
-            # "pivot", see Robot.pivot) instead of driving on and spinning on
-            # the spot, where the drive before a normal turn pushes the box
-            # towards the table edge:
-            #   1. at the bottom corner, coming down from the first box's
-            #      junction (c.PIVOT_TURN_AT: JUNCTION_GREEN_1 ->
-            #      JUNCTION_LEFT_BOTTOM, JUNCTION_RED_1 -> JUNCTION_RIGHT_BOTTOM);
-            #   2. at a drop junction, coming out of a slot that already held a
-            #      box (the robot still has its box) on the way to the next slot.
-            # The turn item gets a 4th value, e.g. ["turning", "left", 90, "pivot"];
-            # the "turning" mode below then pivots instead of spinning.
             turn_item = robot.queue[-1] if robot.queue else None
             if (isinstance(turn_item, list) and turn_item[0] == "turning"
                     and turn_item[1] in ("left", "right")):
@@ -751,23 +615,13 @@ def robot_mode_check(variables, now):
             if next_item == "collect":
                 # Plan collection point
                 # Find collection point route and enter. include "pick_up"     
-                # CHANGED (2026-10-27): look at the boxes in a FIXED order
-                # (config.PICKUP_ORDER). The old loop went through map.keys(),
-                # whose order MicroPython does not keep, so the box chosen was
-                # effectively random (on the robot it went to GREEN_2 first).
-                # GREEN boxes are delivered on the LEFT side (drop_off_info[0]
-                # = 0), RED boxes on the RIGHT side (1), as before.
                 for key in robot.order_colours(config.PICKUP_ORDER):
                     if map[key]["type"]=="DEAD_END":
                         robot.drop_off_info[0] = 0 if key.startswith("GREEN_") else 1
                         robot.final_objective=key
                         break
                 else:
-                    # All boxes collected: mark them free again, as before.
-                    # FIX (2026-10-27): the old line used
-                    # key.startswith(("GREEN_","RED_")) - a tuple argument,
-                    # which MicroPython's str.startswith does not accept (it
-                    # would have crashed here once every box was taken).
+                    # All boxes collected: mark them free again.
                     for key in config.PICKUP_ORDER:
                         map[key]["type"]="DEAD_END"
                     robot.queue.append("collect")
@@ -843,9 +697,6 @@ def robot_mode_check(variables, now):
                 robot.forward(motor3,motor4, motor3.backward_speed-10, motor4.backward_speed-10, reverse=reversing)
                 robot.mode="straight"
             elif next_item == "wait_light":
-                            # ADDED (2026-10-20): stop in front of the traffic light
-                            # and watch it; the "wait_light" mode below goes on
-                            # when it is green.
                 robot.stop(motor3, motor4)
                 tasks.light_reset()
                 print("waiting for the traffic light")
@@ -853,9 +704,6 @@ def robot_mode_check(variables, now):
     elif robot.mode == "straight":
     
                     # Detection
-                    # CHANGED (2026-10-20): junctions are ignored until
-                    # holdoff_until (set when a junction is detected, see
-                    # JUNCTION_HOLDOFF_MS at the top; not set after a turn).
         if  ( 
                 ( 
                     ( 
@@ -885,7 +733,6 @@ def robot_mode_check(variables, now):
             print(robot.position)
     
             robot.position=robot.objective
-                        # print("ROBOT_OBJECTIVE"+robot.objective)
                         
                         # In case it wants to reverse
             if reversing:
@@ -927,7 +774,6 @@ def robot_mode_check(variables, now):
             print(robot.position)
     
             robot.position=robot.objective
-                        # print("ROBOT_OBJECTIVE"+robot.objective)
                         
                         # In case it wants to reverse
             if reversing:
@@ -975,9 +821,6 @@ def robot_mode_check(variables, now):
                     # There are two ways we can do this. Either turn for a certain amount of time, or turn until fron sensors trigger
                     # If straight, then go straight for a bit so that it doesn't immediately trigger junction hit again?
                 
-                    # CHANGED (2026-10-20): skip_forward (see the top of main()): no
-                    # driving forwards before this turn, the wheels are already on
-                    # the junction.
         if not turning:
                         # Turning hasn't started, do the turns
             turning=True
@@ -989,10 +832,6 @@ def robot_mode_check(variables, now):
                 forward_ms = 0
             else:
                 forward_ms = c.NODE_FORWARD_MS
-            # ADDED (2026-10-30, experimental): a pivot turn (4th value
-            # "pivot", see Robot.pivot) drives on only c.PIVOT_FORWARD_MS: it
-            # turns about the inside wheel, which must stop half the wheel
-            # track BEFORE the junction centre, not on it.
             pivot = len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot"
             if pivot and forward_ms > 0:
                 forward_ms = c.PIVOT_FORWARD_MS
@@ -1018,7 +857,6 @@ def robot_mode_check(variables, now):
             if now>=time_count:
                 
                 robot.mode_extra_specific="move_turning"
-                # reversing=False
                 left_old_line=False
                 turn_min = c.TURN_MIN_MS
                             
@@ -1032,8 +870,6 @@ def robot_mode_check(variables, now):
                                 # initial turn
                 elif robot.mode_specific[0]=="left":
                     if len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot":
-                        # ADDED (2026-10-30, experimental): about one wheel;
-                        # it turns half as fast, so the minimum time is longer
                         robot.pivot(motor3, motor4, "left", c.TURN_SPEED)
                         time_count=now+c.PIVOT_TURN_MIN_MS
                     else:
@@ -1041,17 +877,12 @@ def robot_mode_check(variables, now):
                         time_count=now+turn_min
                 elif robot.mode_specific[0]=="right":
                     if len(robot.mode_specific) > 2 and robot.mode_specific[2] == "pivot":
-                        # ADDED (2026-10-30, experimental): see "left" above
                         robot.pivot(motor3, motor4, "right", c.TURN_SPEED)
                         time_count=now+c.PIVOT_TURN_MIN_MS
                     else:
                         robot.spin(motor3, motor4, "right", c.TURN_SPEED)
                         time_count=now+turn_min
                 elif robot.mode_specific[0]=="about":
-                    # CHANGED (2026-10-30): a turning item can say which way
-                    # to turn round with a 3rd value, e.g.
-                    # ["turning", "about", 90, "left"]. Without it: "right",
-                    # as before.
                     about_direction = "right"
                     if len(robot.mode_specific) > 2:
                         about_direction = robot.mode_specific[2]
@@ -1066,20 +897,6 @@ def robot_mode_check(variables, now):
             if now>time_count:
                 if robot.front_left_sensor == 1 and robot.front_right_sensor == 1:
                     robot.stop(motor3,motor4)
-                    # ADDED (2026-10-30): after a 90 degree turn, back up a
-                    # little (c.AFTER_TURN_REVERSE_MS), so the line following
-                    # that comes next has more line to straighten the robot
-                    # on (the turns ended slightly past 90 degrees). A short
-                    # blocking move, like the reverse after a drop-off.
-                    # Not after a U-turn ("about"). CHANGED (2026-10-30,
-                    # later): also before "drop_off" (the user: without it the
-                    # box catches on the slot's frame); the drop-off drives
-                    # in that much longer, so the slot check stays where it
-                    # was calibrated (see drop_off_distance below).
-                    # CHANGED (2026-10-30, later): the turn into a box's line
-                    # ("pick_up" comes next) backs up longer,
-                    # c.PICKUP_TURN_REVERSE_MS: that line is short, so the
-                    # line following needs more room before the pick-up.
                     reverse_ms = c.AFTER_TURN_REVERSE_MS
                     if robot.queue and robot.queue[-1] == "pick_up":
                         reverse_ms = c.PICKUP_TURN_REVERSE_MS
@@ -1093,23 +910,11 @@ def robot_mode_check(variables, now):
                     print(robot.direction)
     
                     turning=False
-                                # CHANGED (2026-10-20): no junction hold-off after a
-                                # turn (see JUNCTION_HOLDOFF_MS at the top).
                     holdoff_until = 0
                                 
                                 
                                 
     elif robot.mode == "pick_up":
-        # CHANGED (2026-10-27): the pick-up is now control/pickup.py's PickUp
-        # sequence (the partner's scan-and-reverse draft that was here never
-        # finished: it set mode_extra_specific to "return turn" but tested for
-        # "return_turn", and it grabbed even when it saw no box).
-        # It starts right after the robot has turned from the main line into
-        # the red / green box: follow the box's line to its white cross line
-        # (all four sensors white), straight on until the front distance
-        # sensor reads config.GRAB_STOP_MM, grab (servo1 down, servo2 closed,
-        # servo1 up), U-turn, follow the line back to the main line and stop
-        # there. See control/pickup.py and the PICKUP_... settings in config.py.
         if not picking_up:
             picking_up=True
             robot.previous_position=robot.position
@@ -1138,9 +943,6 @@ def robot_mode_check(variables, now):
                 # starts from this junction; the next turn first drives
                 # NODE_FORWARD_MS so the wheels get onto the junction, exactly
                 # as after any junction found while driving straight.
-                # CHANGED (2026-10-27): the box's magnet was already read by
-                # the pick-up sequence right after the grab (robot.pickup.pole)
-                # - no second reading here.
                 
                 
                 
@@ -1155,15 +957,9 @@ def robot_mode_check(variables, now):
                     confidence=robot.pickup.confidence
                     
                     robot.drop_off_info[1] = 1 if level == "N" else 0
-                    # level = robot.pickup.level
-                    # robot.drop_off_info[1] = 1 if level == "TOP" else 0
                 robot.previous_position=robot.position
                 robot.position="JUNCTION_" + robot.final_objective
                 robot.mode=""
-                # ADDED (2026-10-27): for now the robot only REPORTS the pole
-                # and stops on the main line after the U-turn (it does not
-                # yet turn left / right because of it). A press of the button
-                # goes on with the route.
                 picking_up=False
                 if config.STOP_AFTER_PICKUP:
                     robot.stop(motor3, motor4)
@@ -1178,23 +974,6 @@ def robot_mode_check(variables, now):
                 is_started=False
                 robot.mode=""
     elif robot.mode == "drop_off":
-                    #Do some actual dropping off stuff etc
-        # utime.sleep(2)
-        # print("DROPPING STUFF")
-        #             # This should have the dropping off and so on code
-        # # =======================
-        # robot.previous_position=robot.position
-        # robot.position=robot.objective
-        # map[robot.final_objective]["type"]="FILLED"
-                                    
-        # robot.mode=""
-        
-        
-        # robot.stop(motor3, motor4)
-        # drive_in_and_drop(robot, motor3, motor4, servo1, servo2, line=sensors)   # follows the branch's line
-        # if config.STOP_AFTER_DROP:
-        #     is_started=False
-        #     print("STOP_AFTER_DROP: stopped after the drop-off - press the button to go on")
         
         
         if not dropping_off:
@@ -1219,9 +998,6 @@ def robot_mode_check(variables, now):
                     drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_TO_DROP_OFF_SCAN_RIGHT
             else:
                 drop_off_distance=c.DISTANCE_TO_DROP_OFF_SCAN-c.MINUS_DISTANCE_FOR_TOP_DROP_OFF
-            # ADDED (2026-10-30): the turn into this branch ended with a short
-            # reverse (c.AFTER_TURN_REVERSE_MS), so drive in that much longer:
-            # the slot check stays at the calibrated place.
             drop_off_distance+=c.AFTER_TURN_REVERSE_MS
 
             time_count=now+drop_off_distance
@@ -1242,31 +1018,13 @@ def robot_mode_check(variables, now):
                         # If this is coming from drop_off point
             if drop_off_turn_count==0:
                 skip_forward=True
-                # CHANGED (2026-10-30): on the top level there are railings,
-                # so the U-turn goes towards the open side:
-                #   left side  (drop_off_info[0]==0): turn round to the right
-                #   right side (drop_off_info[0]==1): turn round to the left
-                # CHANGED (2026-10-30, later): the same on the bottom level.
-                # Always turning right there made the right side NOT a mirror
-                # image of the left: the rear sensor read 310 - 324 mm on
-                # EMPTY right slots (left: empty 376, full 306), so empty
-                # slots were seen as full.
                 if robot.drop_off_info[0]==1:
                     robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
                 else:
                     robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
-                    # robot.queue+=["drop_off", ["turning", "about", 90]]
                 robot.mode=""
             elif drop_off_turn_count==1:
                 utime.sleep_ms(100)
-                # CHANGED (2026-10-29): read the rear sensor for
-                # config.SLOT_READ_MS while standing still and take the median
-                # (TaskSensors.rear_distance). The old loop asked 10 times
-                # within a few ms, calling poll() twice per pass. The sensor
-                # only has a new value every config.TOF_PERIOD_MS (100 ms), so
-                # the second poll() always returned False ("poll not
-                # polling"), no reading was kept, and the slot was always
-                # seen as empty. It also crashed if the rear sensor was missing.
                 for i in range(5):
                     d = tasks.rear_distance()
                     if d or robot.drop_off_info[1]==1:
@@ -1276,7 +1034,7 @@ def robot_mode_check(variables, now):
                         print("trying again, reading was: %s" %tasks.last_rear_readings)
                 print("rear sensor readings: %s" % tasks.last_rear_readings)
                 # No reading = nothing in range behind the robot = empty slot
-                # (the same 1000 as before when the list was empty).
+                # (1000 = empty).
                 mean_scan = d if d is not None else 1000
                 
                 
@@ -1286,18 +1044,11 @@ def robot_mode_check(variables, now):
                     # Use sensor to detect if box is there or not
                     print("NO BOX SEEN")
                     skip_forward=True
-                    # CHANGED (2026-10-30): on the top level turn back the
-                    # other way, through the same open side as the first
-                    # U-turn (railings):
-                    #   left side  (drop_off_info[0]==0): turn round to the left
-                    #   right side (drop_off_info[0]==1): turn round to the right
-                    # The bottom level turns round to the right, as before.
                     if robot.drop_off_info[0]==1:
                         robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
                     else:
                         robot.queue+=["drop_off", ["turning", "about", 90, "left"]]
 
-                        # robot.queue+=["drop_off", ["turning", "about", 90]]
                     robot.mode=""
                 else:
                     print("BOX THERE ALREADY")
@@ -1313,15 +1064,6 @@ def robot_mode_check(variables, now):
                     dropping_off=False
             elif drop_off_turn_count==2:
                 gripper_lift(servo1, servo2)
-                # ADDED (2026-10-30): back up first (c.DROP_RUNUP_MS), then
-                # drive in that much longer. The line following of this last
-                # drive stops 800 ms before its end (move_and_drop_off
-                # below). Since the slot check moved closer to the slot, this
-                # drive (DISTANCE_TO_DROP_POINT) was shorter than 800 ms, so it
-                # had NO line following at all: any angle left by the U-turn
-                # went straight on, and the box caught on the slot's frame.
-                # The run-up gives the line following room to straighten the
-                # robot first, as before the slot check moved.
                 if c.DROP_RUNUP_MS > 0:
                     robot.forward(motor3, motor4, reverse=True)
                     utime.sleep_ms(c.DROP_RUNUP_MS)
@@ -1400,10 +1142,6 @@ def robot_mode_check(variables, now):
     
                     
     elif robot.mode == "wait_light":
-                    # ADDED (2026-10-20): stopped in front of the traffic light (see
-                    # "wait_light" above). Drive on when the IR receiver reports
-                    # green (IR beacon seen without a break for
-                    # config.TRAFFIC_IR_CONFIRM_MS). No time limit.
         if tasks.light_update() == "green":
             print("traffic light green - go (waited %d ms)" % tasks.light_waited_ms())
             robot.mode=""
@@ -1474,19 +1212,9 @@ def initialise_main_variables():
     correction_timeout=0
     
     
-    # ADDED (2026-10-15): state for the fixed turns.
     left_old_line=False   # turning: True once both centre sensors have left the old line
     holdoff_until=0       # ignore junctions until now reaches this (see JUNCTION_HOLDOFF_MS)
-    # ADDED (2026-10-20): True right after the robot has turned on the spot at a
-    # junction to look into a full slot. Its wheels are then already on the
-    # junction, so the next turn must not drive NODE_FORWARD_MS forwards first
-    # (that would drive it into the rack).
     skip_forward=False
-    # ADDED (2026-10-20): set when a node was counted as reached right after a
-    # turn (see CLOSE_AFTER_TURN): the wheels are still short of it, so the
-    # NEXT turn only drives this long first (ms). None = the normal
-    # NODE_FORWARD_MS. after_turn_forward_ms holds the value until the
-    # current turn has finished.
 
     robot=Robot()
     print(robot.position)
@@ -1494,13 +1222,9 @@ def initialise_main_variables():
     map=MAP.MAP.copy()
     # Measure elapsed time
     robot.start = utime.ticks_ms()
-    # elapsed = utime.ticks_diff(utime.ticks_ms(), start)
 
     sensors=line_sensor.LineSensorArray([20,21,19,18],True)
 
-    # ADDED (2026-10-20): start the task sensors. calibrate() measures the
-    # magnet sensor's no-magnet zero point, so it runs here, in the start box,
-    # before the start button is pressed (no box / magnet near the robot).
     tasks = TaskSensors.from_config()
     
     leds = StatusLeds.from_config()
@@ -1508,13 +1232,7 @@ def initialise_main_variables():
     print("magnet sensor zero point: %s mV" % tasks.calibrate())
 
 
-
-    # ADDED (2026-10-15, safety): start / stop button. Nothing moves until
-    # the button is pressed (see wait_for_start above).
     button = StartStopButton.from_config()
-
-
-
 
 
     readings=[]
@@ -1524,14 +1242,9 @@ def initialise_main_variables():
     motor3 = motor.Motor(dirPin=4, PWMPin=5)  # Motor 3 is controlled from Motor Driv2 #1, which is on GP4/5
     motor4 = motor.Motor(dirPin=7, PWMPin=6)  # Motor 4 is controlled from Motor Driv2 #1, which is on GP4/5
     
-    # FIX (2026-10-26, test build): by name - MicroPython dicts do not keep
-    # their order, so .items() could hand servo2 out first.
     servo1 = Servo(config.SERVO_PINS["servo1"])
     servo2 = Servo(config.SERVO_PINS["servo2"])
 
-    # ADDED (2026-10-15): use DRIVE_SPEED (top of this file) instead of the
-    # Motor class default of 100 %. Robot.forward / left / right / backward /
-    # about use these two values whenever no explicit speed is passed.
     motor3.forward_speed = c.DRIVE_SPEED
     motor3.backward_speed = c.DRIVE_SPEED
     motor4.forward_speed = c.DRIVE_SPEED

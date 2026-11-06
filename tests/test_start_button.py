@@ -1,19 +1,3 @@
-"""
-Step 8: start / stop button and indicator LEDs (nothing moves).
-
-The button is the crash sensor named in config.START_STOP_SENSOR ("left" =
-physical 12 / GP9, "right" = physical 11 / GP8). The LEDs are yellow (GP22),
-red (GP27) and green (GP28), switched through the optocoupler.
-
-Checks:
-  1. At start every LED lights for half a second: yellow, red, green.
-     If one stays dark, check its optocoupler channel and 220 ohm resistors.
-  2. Red LED on = STOP. Press the button once: green on = RUN, yellow
-     flashes briefly on every press. Press again: back to STOP.
-  3. One press = exactly one toggle (no double toggles).
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 import config

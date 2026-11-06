@@ -1,11 +1,3 @@
-"""
-Step 7: every sensor at once, one status line every 200 ms plus events.
-
-Run after each sensor has passed its own test. Useful to check that nothing
-interferes (e.g. motor noise on the IR receiver, I2C errors while driving).
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 import config

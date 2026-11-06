@@ -1,15 +1,3 @@
-"""
-Fake `machine` module for running the robot code on a PC against the
-simulator (only what the robot code uses).
-
-Pin  - outputs are reported to the world (motor DIR pins); inputs ask the
-       world for their level (line sensors, crash sensors). IRQ handlers
-       fire on edges the world drives with sim_set().
-PWM  - duty is reported to the world (motor speed).
-ADC, I2C, SoftI2C - present so imports work; no devices are attached.
-Every pin read costs a little simulated time, like on the Pico.
-"""
-
 from sim.fakes import _bus
 
 # Simulated time spent by one Pin.value() read (microseconds).
@@ -81,9 +69,6 @@ class Pin:
 
     def low(self):
         self.value(0)
-
-    def toggle(self):
-        self.value(0 if self._value else 1)
 
     def irq(self, handler=None, trigger=IRQ_FALLING | IRQ_RISING, priority=1, wake=None, hard=False):
         self._handler = handler
@@ -190,13 +175,7 @@ def freq(f=None):
     return 150000000 if f is None else None
 
 
-def unique_id():
-    return b"SIMULATR"
-
 
 def reset():
     raise SystemExit("machine.reset() called in the simulator")
 
-
-def soft_reset():
-    raise SystemExit("machine.soft_reset() called in the simulator")

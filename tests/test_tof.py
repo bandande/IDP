@@ -1,29 +1,3 @@
-"""
-Step 3: 2 x VL53L0X time-of-flight sensors.
-
-Wiring per sensor (boards labelled + - C D): + -> 3V3_OUT (physical 36,
-never 5V), - -> GND (physical 38), D = SDA and C = SCL.
-CHANGED (2026-10-27): the team re-wired the SDA wires; the pins are in
-config.TOF_SENSORS, and both buses are now software I2C (SoftI2C):
-    Distance Sensor 1 "dist1" = GRAB sensor (front, through the gripper):
-        D -> GP2 (physical 4), C -> GP17 (physical 22)
-        (D must NOT also touch VCC: the schematic draws them on one wire by mistake)
-    Distance Sensor 2 "dist2" = REAR sensor (back of the robot):
-        D -> GP0 (physical 1), C -> GP11 (physical 15)
-No XSHUT pin on these boards (one sensor per bus instead). No extra parts:
-the Pico enables its internal pull-ups; add 4.7k pull-ups to 3V3 if
-readings are flaky on long wires (I2C_FREQ_HZ is already 100000).
-Peel the protective film off the sensor window.
-
-Checks:
-  1. "available True" for both sensors (else see last_error and run test_wiring).
-  2. Hand / box at 100-500 mm: distance follows it, status 11.
-  3. Nothing in front: distance None, raw 8190/8191 or status 4.
-Offset calibration: calibrate_offset("dist1", 100) with a flat target exactly
-100 mm in front of the sensor, then copy the printed offset into config.py.
-Stop with Ctrl-C.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 from sensors.tof import tof_from_config
@@ -31,11 +5,6 @@ from sensors.tof import tof_from_config
 
 def test_tof(seconds=None):
     tofs = tof_from_config()
-    # CHANGED (2026-10-29): the endless "print(s.processor.value)" loop that
-    # was here never asked the sensors for new values (no poll()), so it
-    # only printed None and the real test below was never reached. The
-    # loop below prints the filtered distance (and raw value / status)
-    # every 100 ms, which is what that loop was meant to show.
     for name, s in tofs.items():
         print("%s: address 0x%02X available %s %s" % (
             name, s.address, s.available, "" if s.available else s.last_error))
@@ -49,7 +18,6 @@ def test_tof(seconds=None):
             last_print = now
             parts = []
             for name, s in tofs.items():
-                # CHANGED (2026-10-29): also the number of automatic restarts
                 parts.append("%s: %s mm (raw %s, status %s, errors %d, restarts %d)" % (
                     name, s.get_distance(now), s.raw_mm, s.range_status, s.error_count, s.restart_count))
             print("   ".join(parts))

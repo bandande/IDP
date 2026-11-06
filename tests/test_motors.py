@@ -1,25 +1,3 @@
-"""
-Step 9: drive motors - which wheel is which, which way is forward, dead band.
-
-SAFETY: for the first run put the robot on a stand with the wheels off the
-table. The motors only move after a press of the start/stop button
-(config.START_STOP_SENSOR); press it again at any time to stop everything.
-Ctrl-C also stops the motors.
-
-test_motors(): after the press (yellow LED = waiting, green = running):
-  1. LEFT wheel forward      -> only the LEFT wheel turns, forwards
-  2. RIGHT wheel forward     -> only the RIGHT wheel turns, forwards
-  3. both forward            -> the robot would drive straight ahead
-  4. spin left               -> left wheel backwards, right wheel forwards
-  5. spin right              -> left wheel forwards, right wheel backwards
-  If step 1 moved the right wheel: swap the MOTOR_LEFT_* and MOTOR_RIGHT_*
-  pins in config.py. If a wheel turned backwards when it should go forwards:
-  flip MOTOR_LEFT_INVERT / MOTOR_RIGHT_INVERT. Then run it again.
-
-ramp_test(): both wheels forward from 0 to 60 % in 5 % steps. Note the
-first value at which BOTH wheels turn and put it into MOTOR_MIN_DUTY.
-"""
-
 from utime import sleep_ms, ticks_ms, ticks_diff
 
 import config

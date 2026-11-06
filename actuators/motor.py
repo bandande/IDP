@@ -1,23 +1,3 @@
-"""
-Drive motors on the department motor driver (one DIR pin + one PWM pin each).
-
-The driver turns the motor one way with DIR = 0 and the other way with
-DIR = 1; the PWM duty cycle sets the speed. Whether DIR = 0 is "forward" for a
-wheel depends on how its motor is mounted and wired, so each motor has an
-`invert` flag. Find the right flags with tests/test_motors.py.
-
-Speeds are percent of full power, -100 .. +100 (negative = backwards).
-`min_duty` lifts every non-zero speed above the motor's dead band: with
-min_duty = 20, a request of 1 % gives 20.8 % and 100 % stays 100 %.
-
-Usage
-    from actuators.motor import DriveBase
-    drive = DriveBase.from_config()
-    drive.drive(40, 40)      # straight on
-    drive.drive(-30, 30)     # spin left on the spot
-    drive.stop()
-"""
-
 from machine import Pin, PWM
 
 
@@ -59,10 +39,6 @@ class Motor:
     def stop(self):
         self.speed = 0
         self._pwm.duty_u16(0)
-
-    def duty_percent(self):
-        """The PWM duty cycle actually applied, in percent."""
-        return self._pwm.duty_u16() * 100.0 / 65535
 
 
 class DriveBase:
